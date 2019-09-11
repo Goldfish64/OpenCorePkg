@@ -28,6 +28,8 @@ STATIC OC_STORAGE_CONTEXT  *mOcStorage;
 STATIC OC_GLOBAL_CONFIG    *mOcConfiguration;
 STATIC OC_CPU_INFO         *mOcCpuInfo;
 
+STATIC CHAR16              **mOcInjectedKexts;
+
 STATIC
 VOID
 OcKernelReadDarwinVersion (
@@ -500,6 +502,250 @@ OcKernelProcessPrelinked (
 
 STATIC
 EFI_STATUS
+OcKernelBuildExtensionsDir (
+  IN     OC_GLOBAL_CONFIG  *Config,
+  IN OUT EFI_FILE_PROTOCOL  **File,
+  IN     CHAR16             *FileName
+  )
+{
+  EFI_STATUS        Status;
+  EFI_FILE_INFO     *FileInfo;
+  UINTN             ReadSize;
+  CHAR16            *FileNameCopy;
+
+  UINTN             DirectorySize;
+  UINT8             *DirectoryBuffer;
+  EFI_FILE_PROTOCOL *VirtualFileHandle;
+  EFI_FILE_PROTOCOL *NewFile;
+
+  UINT32               Index;
+  UINT32               FileNameIndex;
+  OC_KERNEL_ADD_ENTRY  *Kext;
+  CHAR16               BundleFileName[128];
+  UINTN                BundleFileNameSize;
+
+  DirectorySize = 0;
+  DirectoryBuffer = NULL;
+  FileNameIndex = 0;
+
+  //
+  // Build virtual directory buffer containing injected kernel extensions.
+  // An array is created to maintain extension to name mappings.
+  //
+  mOcInjectedKexts = AllocateZeroPool (sizeof (CHAR16*) * Config->Kernel.Add.Count);
+  for (Index = 0; Index < Config->Kernel.Add.Count; ++Index) {
+    Kext = Config->Kernel.Add.Values[Index];
+    if (!Kext->Enabled || Kext->PlistDataSize == 0) {
+      continue;
+    }
+
+    //
+    // Generate next available filename.
+    //
+    do {
+      UnicodeSPrint (BundleFileName, sizeof (BundleFileName), L"Oc%X.kext", FileNameIndex++);
+      Status = (*File)->Open (*File, &NewFile, BundleFileName, EFI_FILE_MODE_READ, 0);
+      if (!EFI_ERROR (Status)) {
+        NewFile->Close (NewFile);
+      }
+    } while (!EFI_ERROR (Status));
+
+    BundleFileNameSize = StrSize (BundleFileName);
+    mOcInjectedKexts[Index] = AllocateCopyPool (BundleFileNameSize, BundleFileName);
+
+    //
+    // Create directory entry.
+    //
+    ReadSize = DirectorySize;
+    DirectorySize += ALIGN_VALUE (SIZE_OF_EFI_FILE_INFO + BundleFileNameSize, OC_ALIGNOF (EFI_FILE_INFO));
+    DirectoryBuffer = ReallocatePool (ReadSize, DirectorySize, DirectoryBuffer);
+    FileInfo = (EFI_FILE_INFO*)(DirectoryBuffer + ReadSize);
+
+    CopyMem (FileInfo->FileName, BundleFileName, BundleFileNameSize);
+    FileInfo->Size = SIZE_OF_EFI_FILE_INFO + BundleFileNameSize;
+    FileInfo->Attribute = EFI_FILE_READ_ONLY | EFI_FILE_DIRECTORY;
+    FileInfo->FileSize = SIZE_OF_EFI_FILE_INFO + StrSize(L"Contents");
+    FileInfo->PhysicalSize = FileInfo->FileSize;
+  }
+
+  FileNameCopy = AllocateCopyPool (StrSize (FileName), FileName);
+  if (FileNameCopy == NULL) {
+    DEBUG ((DEBUG_WARN, "Failed to allocate dir name (%a) copy\n", FileName));
+    FreePool (DirectoryBuffer);
+    return EFI_OUT_OF_RESOURCES;
+  }
+
+  Status = CreateVirtualDir (FileNameCopy, DirectoryBuffer, DirectorySize, NULL, *File, &VirtualFileHandle);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_WARN, "Failed to virtualise dir file (%a)\n", FileName));
+    FreePool (DirectoryBuffer);
+    FreePool (FileNameCopy);
+    return EFI_OUT_OF_RESOURCES;
+  }
+
+  //
+  // Return our virtual handle.
+  //
+  *File = VirtualFileHandle;
+  return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+OcKernelProcessExtensionsDir (
+  IN  OC_GLOBAL_CONFIG  *Config,
+  OUT EFI_FILE_PROTOCOL  **File,
+  IN  CHAR16             *FileName
+  ) 
+{
+  EFI_STATUS          Status;
+  CHAR16              *FileNameCopy;
+  EFI_FILE_PROTOCOL   *VirtualFileHandle;
+  CHAR16              *RealFileName;
+  UINT8               *Buffer;
+  UINTN               BufferSize;
+  UINT32              Index;
+  OC_KERNEL_ADD_ENTRY *Kext;
+
+  CHAR16              *BundleName;
+  CHAR16              *KextExtension;
+  CHAR16              *BundlePath;
+  UINTN               BundleLength;
+
+  EFI_FILE_INFO       *FileInfo;
+  UINTN               ContentsInfoEntrySize;
+  UINTN               ContentsMacOsEntrySize;
+
+  //
+  // Only process injected extensions.
+  //
+  BundleName = StrStr (FileName, L"Oc");
+  KextExtension = StrStr (FileName, L".kext");
+  if (BundleName == NULL || KextExtension == NULL) {
+    return EFI_NOT_FOUND;
+  }
+  BundlePath = KextExtension + StrLen (L".kext");
+  BundleLength = BundlePath - BundleName;
+
+  //
+  // Find matching kernel extension.
+  //
+  for (Index = 0; Index < Config->Kernel.Add.Count; ++Index) {
+    if (StrnCmp (BundleName, mOcInjectedKexts[Index], BundleLength) == 0) {
+      Kext = Config->Kernel.Add.Values[Index];
+      DEBUG ((DEBUG_INFO, "%s for kext %u requested\n", FileName, Index));
+
+      //
+      // Contents is being requested.
+      //
+      if (StrCmp (BundlePath, L"\\Contents") == 0) {
+        //
+        // Calculate and allocate entry for Contents.
+        //
+        ContentsInfoEntrySize = SIZE_OF_EFI_FILE_INFO + StrSize (L"Info.plist");
+        ContentsMacOsEntrySize = SIZE_OF_EFI_FILE_INFO + StrSize (L"MacOS");
+        BufferSize = ContentsInfoEntrySize + ContentsMacOsEntrySize + ALIGN_VALUE (ContentsInfoEntrySize, OC_ALIGNOF (EFI_FILE_INFO));
+        Buffer = AllocateZeroPool (BufferSize); // UNALIGNED?
+        if (Buffer == NULL) {
+          return EFI_OUT_OF_RESOURCES;
+        }
+
+        //
+        // Create Info.plist directory entry.
+        //
+        FileInfo = (EFI_FILE_INFO*)Buffer;
+        FileInfo->Size = ContentsInfoEntrySize;
+        CopyMem (FileInfo->FileName, L"Info.plist", StrSize (L"Info.plist"));
+        FileInfo->Attribute = EFI_FILE_READ_ONLY;
+        FileInfo->PhysicalSize = FileInfo->FileSize = Kext->PlistDataSize;
+
+        //
+        // Create MacOS directory entry.
+        //
+        FileInfo = (EFI_FILE_INFO*)(Buffer + ALIGN_VALUE (ContentsInfoEntrySize, OC_ALIGNOF (EFI_FILE_INFO)));
+        FileInfo->Size = ContentsMacOsEntrySize;
+        CopyMem (FileInfo->FileName, L"MacOS", StrSize (L"MacOS"));
+        FileInfo->Attribute = EFI_FILE_READ_ONLY | EFI_FILE_DIRECTORY;
+        FileInfo->PhysicalSize = FileInfo->FileSize = SIZE_OF_EFI_FILE_INFO + StrSize (L"binaryhere");
+
+        //
+        // Create virtual Contents directory.
+        //
+        FileNameCopy = AllocateCopyPool (StrSize (L"Contents"), L"Contents");
+        if (FileNameCopy == NULL) {
+          DEBUG ((DEBUG_WARN, "Failed to allocate Contents directory name (%a) copy\n", FileName));
+          FreePool (Buffer);
+          return EFI_OUT_OF_RESOURCES;
+        }
+
+        Status = CreateVirtualDir (FileNameCopy, Buffer, BufferSize, NULL, NULL, &VirtualFileHandle);
+        if (EFI_ERROR (Status)) {
+          DEBUG ((DEBUG_WARN, "Failed to virtualise Contents directory (%a)\n", FileName));
+          FreePool (Buffer);
+          FreePool (FileNameCopy);
+          return EFI_OUT_OF_RESOURCES;
+        }
+      } else {
+        //
+        // Contents/Info.plist is being requested.
+        //
+        if (StrCmp (BundlePath, L"\\Contents\\Info.plist") == 0) {
+          // Get Info.plist.
+          RealFileName = L"Info.plist";
+          BufferSize = Kext->PlistDataSize;
+          Buffer = AllocateCopyPool (BufferSize, Kext->PlistData);
+          if (Buffer == NULL) {
+            return EFI_OUT_OF_RESOURCES;
+          }
+
+        //
+        // Contents/MacOS/BINARY is being requested.
+        // It should be safe to assume there will only be one binary ever requested per kext?
+        //
+        } else if (StrStr (BundlePath, L"\\Contents\\MacOS\\") != NULL) {
+          RealFileName = L"BINARY";
+          BufferSize = Kext->ImageDataSize;
+          Buffer = AllocateCopyPool (BufferSize, Kext->ImageData);
+          if (Buffer == NULL) {
+            return EFI_OUT_OF_RESOURCES;
+          }
+        } else {
+          return EFI_NOT_FOUND;
+        }
+
+        //
+        // Create virtual file.
+        //
+        FileNameCopy = AllocateCopyPool (StrSize (RealFileName), RealFileName);
+        if (FileNameCopy == NULL) {
+          DEBUG ((DEBUG_WARN, "Failed to allocate file name (%a) copy\n", FileName));
+          FreePool (Buffer);
+          return EFI_OUT_OF_RESOURCES;
+        }
+
+        Status = CreateVirtualFile (FileNameCopy, Buffer, BufferSize, NULL, &VirtualFileHandle);
+        if (EFI_ERROR (Status)) {
+          DEBUG ((DEBUG_WARN, "Failed to virtualise file (%a)\n", FileName));
+          FreePool (Buffer);
+          FreePool (FileNameCopy);
+          return EFI_OUT_OF_RESOURCES;
+        }
+      }
+
+      //
+      // Return our handle.
+      //
+      *File = VirtualFileHandle;
+      return EFI_SUCCESS;
+    }
+  }
+
+  // No matching kext.
+  return EFI_NOT_FOUND;
+}
+
+STATIC
+EFI_STATUS
 EFIAPI
 OcKernelFileOpen (
   IN  EFI_FILE_PROTOCOL       *This,
@@ -518,6 +764,21 @@ OcKernelFileOpen (
   EFI_STATUS         PrelinkedStatus;
   EFI_TIME           ModificationTime;
   CHAR8              DarwinVersion[16];
+
+  if (OpenMode == EFI_FILE_MODE_READ
+    && StrStr (FileName, L"System\\Library\\Extensions\\Oc") != NULL
+    && StrStr (FileName, L".kext\\Contents") != NULL) {
+    Status = OcKernelProcessExtensionsDir (mOcConfiguration, NewHandle, FileName);
+    DEBUG ((
+    DEBUG_INFO,
+    "Opening injected file %s with %u mode gave - %r\n",
+    FileName,
+    (UINT32) OpenMode,
+    Status
+    ));
+
+    return Status;
+  }
 
   Status = This->Open (This, NewHandle, FileName, OpenMode, Attributes);
 
@@ -600,6 +861,16 @@ OcKernelFileOpen (
       *NewHandle = VirtualFileHandle;
       return EFI_SUCCESS;
     }
+  }
+
+  //
+  // Hook /S/L/E and provide overlay virtual directory for injected kexts.
+  //
+  if (OpenMode == EFI_FILE_MODE_READ
+    && StrCmp (FileName, L"System\\Library\\Extensions") == 0) {
+      DEBUG ((DEBUG_INFO, "Hooking into SLE folder\n"));
+      OcKernelLoadKextsAndReserve (mOcStorage, mOcConfiguration);
+      return OcKernelBuildExtensionsDir (mOcConfiguration, NewHandle, FileName);
   }
 
   //
