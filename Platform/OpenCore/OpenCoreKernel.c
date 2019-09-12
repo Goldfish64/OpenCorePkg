@@ -521,8 +521,8 @@ OcKernelBuildExtensionsDir (
   UINT32               Index;
   UINT32               FileNameIndex;
   OC_KERNEL_ADD_ENTRY  *Kext;
-  CHAR16               BundleFileName[128];
   UINTN                BundleFileNameSize;
+  UINTN                BundleFileNameLength;
 
   DirectorySize = 0;
   DirectoryBuffer = NULL;
@@ -532,8 +532,18 @@ OcKernelBuildExtensionsDir (
   // Build virtual directory buffer containing injected kernel extensions.
   // An array is created to maintain extension to name mappings.
   //
+  // Names are of format OcXXXXXXXX.kext, where XXXXXXXX is a 32-bit hexadecimal number.
+  //
+  BundleFileNameSize = L_STR_SIZE (L"OcXXXXXXXX.kext");
+
+  // TODO: Can this just be a solid string block instead of array of ptrs?
   mOcInjectedKexts = AllocateZeroPool (sizeof (CHAR16*) * Config->Kernel.Add.Count);
-  for (Index = 0; Index < Config->Kernel.Add.Count; ++Index) {
+  if (mOcInjectedKexts == NULL) {
+    DEBUG ((DEBUG_WARN, "Failed to allocate injected kext name mappings\n"));
+    return EFI_OUT_OF_RESOURCES;
+  }
+
+  for (Index = 0; Index < Config->Kernel.Add.Count; Index++) {
     Kext = Config->Kernel.Add.Values[Index];
     if (!Kext->Enabled || Kext->PlistDataSize == 0) {
       continue;
@@ -542,16 +552,32 @@ OcKernelBuildExtensionsDir (
     //
     // Generate next available filename.
     //
+    mOcInjectedKexts[Index] = AllocatePool (BundleFileNameSize);
+    if (mOcInjectedKexts[Index] == NULL) {
+      DEBUG ((DEBUG_WARN, "Failed to allocate injected kext %u name mapping\n", Index));
+      for (Index = 0; Index < Config->Kernel.Add.Count; Index++) {
+        if (mOcInjectedKexts[Index] != NULL) {
+          FreePool (mOcInjectedKexts[Index]);
+        }
+      }
+      FreePool (mOcInjectedKexts);
+
+      return EFI_OUT_OF_RESOURCES;
+    }
+
     do {
-      UnicodeSPrint (BundleFileName, sizeof (BundleFileName), L"Oc%X.kext", FileNameIndex++);
-      Status = (*File)->Open (*File, &NewFile, BundleFileName, EFI_FILE_MODE_READ, 0);
+      if (FileNameIndex == MAX_UINT32) {
+        return EFI_DEVICE_ERROR;
+      }
+
+      BundleFileNameLength = UnicodeSPrint (mOcInjectedKexts[Index], BundleFileNameSize, L"Oc%8X.kext", FileNameIndex++);
+      ASSERT (BundleFileNameLength == L_STR_LEN (L"OcXXXXXXXX.kext"));
+
+      Status = (*File)->Open (*File, &NewFile, mOcInjectedKexts[Index], EFI_FILE_MODE_READ, 0);
       if (!EFI_ERROR (Status)) {
         NewFile->Close (NewFile);
       }
     } while (!EFI_ERROR (Status));
-
-    BundleFileNameSize = StrSize (BundleFileName);
-    mOcInjectedKexts[Index] = AllocateCopyPool (BundleFileNameSize, BundleFileName);
 
     //
     // Create directory entry.
@@ -559,9 +585,20 @@ OcKernelBuildExtensionsDir (
     ReadSize = DirectorySize;
     DirectorySize += ALIGN_VALUE (SIZE_OF_EFI_FILE_INFO + BundleFileNameSize, OC_ALIGNOF (EFI_FILE_INFO));
     DirectoryBuffer = ReallocatePool (ReadSize, DirectorySize, DirectoryBuffer);
-    FileInfo = (EFI_FILE_INFO*)(DirectoryBuffer + ReadSize);
+    if (DirectoryBuffer == NULL) {
+      DEBUG ((DEBUG_WARN, "Failed to allocate directory buffer\n"));
+      for (Index = 0; Index < Config->Kernel.Add.Count; Index++) {
+        if (mOcInjectedKexts[Index] != NULL) {
+          FreePool (mOcInjectedKexts[Index]);
+        }
+      }
+      FreePool (mOcInjectedKexts);
 
-    CopyMem (FileInfo->FileName, BundleFileName, BundleFileNameSize);
+      return EFI_OUT_OF_RESOURCES;
+    }
+
+    FileInfo = (EFI_FILE_INFO*)(DirectoryBuffer + ReadSize);
+    CopyMem (FileInfo->FileName, mOcInjectedKexts[Index], BundleFileNameSize);
     FileInfo->Size = SIZE_OF_EFI_FILE_INFO + BundleFileNameSize;
     FileInfo->Attribute = EFI_FILE_READ_ONLY | EFI_FILE_DIRECTORY;
     FileInfo->FileSize = SIZE_OF_EFI_FILE_INFO + StrSize(L"Contents");
@@ -572,6 +609,13 @@ OcKernelBuildExtensionsDir (
   if (FileNameCopy == NULL) {
     DEBUG ((DEBUG_WARN, "Failed to allocate dir name (%a) copy\n", FileName));
     FreePool (DirectoryBuffer);
+    for (Index = 0; Index < Config->Kernel.Add.Count; Index++) {
+      if (mOcInjectedKexts[Index] != NULL) {
+        FreePool (mOcInjectedKexts[Index]);
+      }
+    }
+    FreePool (mOcInjectedKexts);
+
     return EFI_OUT_OF_RESOURCES;
   }
 
@@ -580,6 +624,13 @@ OcKernelBuildExtensionsDir (
     DEBUG ((DEBUG_WARN, "Failed to virtualise dir file (%a)\n", FileName));
     FreePool (DirectoryBuffer);
     FreePool (FileNameCopy);
+    for (Index = 0; Index < Config->Kernel.Add.Count; Index++) {
+      if (mOcInjectedKexts[Index] != NULL) {
+        FreePool (mOcInjectedKexts[Index]);
+      }
+    }
+    FreePool (mOcInjectedKexts);
+
     return EFI_OUT_OF_RESOURCES;
   }
 
