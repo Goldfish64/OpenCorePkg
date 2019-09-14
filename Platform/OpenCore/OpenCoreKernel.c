@@ -508,41 +508,39 @@ OcKernelBuildExtensionsDir (
   IN     CHAR16             *FileName
   )
 {
-  EFI_STATUS        Status;
-  EFI_FILE_INFO     *FileInfo;
-  UINTN             ReadSize;
-  CHAR16            *FileNameCopy;
+  EFI_STATUS           Status;
+  EFI_FILE_INFO        *FileInfo;
+  CHAR16               *FileNameCopy;
 
-  UINTN             DirectorySize;
-  UINT8             *DirectoryBuffer;
-  EFI_FILE_PROTOCOL *VirtualFileHandle;
-  EFI_FILE_PROTOCOL *NewFile;
+  UINTN                DirectorySize;
+  UINTN                DirectoryOffset;
+  UINT8                *DirectoryBuffer;
+  EFI_FILE_PROTOCOL    *VirtualFileHandle;
+  EFI_FILE_PROTOCOL    *NewFile;
 
   UINT32               Index;
+  UINT32               IndexClean;
   UINT32               FileNameIndex;
   OC_KERNEL_ADD_ENTRY  *Kext;
   UINTN                BundleFileNameSize;
   UINTN                BundleFileNameLength;
 
-  DirectorySize = 0;
-  DirectoryBuffer = NULL;
-  FileNameIndex = 0;
-
   //
-  // Build virtual directory buffer containing injected kernel extensions.
-  // An array is created to maintain extension to name mappings.
-  //
+  // Allocate array to maintain extension to name mappings.
   // Names are of format OcXXXXXXXX.kext, where XXXXXXXX is a 32-bit hexadecimal number.
   //
   BundleFileNameSize = L_STR_SIZE (L"OcXXXXXXXX.kext");
-
-  // TODO: Can this just be a solid string block instead of array of ptrs?
   mOcInjectedKexts = AllocateZeroPool (sizeof (CHAR16*) * Config->Kernel.Add.Count);
   if (mOcInjectedKexts == NULL) {
     DEBUG ((DEBUG_WARN, "Failed to allocate injected kext name mappings\n"));
     return EFI_OUT_OF_RESOURCES;
   }
 
+  //
+  // Generate injected kernel extension names and calculate directory size.
+  //
+  FileNameIndex = 0;
+  DirectorySize = 0;
   for (Index = 0; Index < Config->Kernel.Add.Count; Index++) {
     Kext = Config->Kernel.Add.Values[Index];
     if (!Kext->Enabled || Kext->PlistDataSize == 0) {
@@ -555,9 +553,9 @@ OcKernelBuildExtensionsDir (
     mOcInjectedKexts[Index] = AllocatePool (BundleFileNameSize);
     if (mOcInjectedKexts[Index] == NULL) {
       DEBUG ((DEBUG_WARN, "Failed to allocate injected kext %u name mapping\n", Index));
-      for (Index = 0; Index < Config->Kernel.Add.Count; Index++) {
-        if (mOcInjectedKexts[Index] != NULL) {
-          FreePool (mOcInjectedKexts[Index]);
+      for (IndexClean = 0; IndexClean <= Index; IndexClean++) {
+        if (mOcInjectedKexts[IndexClean] != NULL) {
+          FreePool (mOcInjectedKexts[IndexClean]);
         }
       }
       FreePool (mOcInjectedKexts);
@@ -579,41 +577,50 @@ OcKernelBuildExtensionsDir (
       }
     } while (!EFI_ERROR (Status));
 
-    //
-    // Create directory entry.
-    //
-    ReadSize = DirectorySize;
     DirectorySize += ALIGN_VALUE (SIZE_OF_EFI_FILE_INFO + BundleFileNameSize, OC_ALIGNOF (EFI_FILE_INFO));
-    DirectoryBuffer = ReallocatePool (ReadSize, DirectorySize, DirectoryBuffer);
-    if (DirectoryBuffer == NULL) {
-      DEBUG ((DEBUG_WARN, "Failed to allocate directory buffer\n"));
-      for (Index = 0; Index < Config->Kernel.Add.Count; Index++) {
-        if (mOcInjectedKexts[Index] != NULL) {
-          FreePool (mOcInjectedKexts[Index]);
-        }
+  }
+
+  //
+  // Allocate directory buffer.
+  //
+  DirectoryBuffer = AllocateZeroPool (DirectorySize);
+  if (DirectoryBuffer == NULL) {
+    DEBUG ((DEBUG_WARN, "Failed to allocate directory buffer\n"));
+    for (IndexClean = 0; IndexClean < Config->Kernel.Add.Count; IndexClean++) {
+      if (mOcInjectedKexts[IndexClean] != NULL) {
+        FreePool (mOcInjectedKexts[IndexClean]);
       }
-      FreePool (mOcInjectedKexts);
-
-      return EFI_OUT_OF_RESOURCES;
     }
+    FreePool (mOcInjectedKexts);
 
-    FileInfo = (EFI_FILE_INFO*)(DirectoryBuffer + ReadSize);
+    return EFI_OUT_OF_RESOURCES;
+  }
+
+  //
+  // Build directory structure.
+  //
+  DirectoryOffset = 0;
+  for (Index = 0; Index < Config->Kernel.Add.Count; Index++) {
+    FileInfo = (EFI_FILE_INFO*)(DirectoryBuffer + DirectoryOffset); // Does this need overflow protection?
+
     CopyMem (FileInfo->FileName, mOcInjectedKexts[Index], BundleFileNameSize);
     FileInfo->Size = SIZE_OF_EFI_FILE_INFO + BundleFileNameSize;
     FileInfo->Attribute = EFI_FILE_READ_ONLY | EFI_FILE_DIRECTORY;
     FileInfo->FileSize = SIZE_OF_EFI_FILE_INFO + StrSize(L"Contents");
     FileInfo->PhysicalSize = FileInfo->FileSize;
+
+    DirectoryOffset += ALIGN_VALUE (SIZE_OF_EFI_FILE_INFO + BundleFileNameSize, OC_ALIGNOF (EFI_FILE_INFO));
   }
 
   FileNameCopy = AllocateCopyPool (StrSize (FileName), FileName);
   if (FileNameCopy == NULL) {
     DEBUG ((DEBUG_WARN, "Failed to allocate dir name (%a) copy\n", FileName));
     FreePool (DirectoryBuffer);
-    for (Index = 0; Index < Config->Kernel.Add.Count; Index++) {
-      if (mOcInjectedKexts[Index] != NULL) {
-        FreePool (mOcInjectedKexts[Index]);
+    for (IndexClean = 0; IndexClean < Config->Kernel.Add.Count; IndexClean++) {
+        if (mOcInjectedKexts[IndexClean] != NULL) {
+          FreePool (mOcInjectedKexts[IndexClean]);
+        }
       }
-    }
     FreePool (mOcInjectedKexts);
 
     return EFI_OUT_OF_RESOURCES;
@@ -624,11 +631,11 @@ OcKernelBuildExtensionsDir (
     DEBUG ((DEBUG_WARN, "Failed to virtualise dir file (%a)\n", FileName));
     FreePool (DirectoryBuffer);
     FreePool (FileNameCopy);
-    for (Index = 0; Index < Config->Kernel.Add.Count; Index++) {
-      if (mOcInjectedKexts[Index] != NULL) {
-        FreePool (mOcInjectedKexts[Index]);
+    for (IndexClean = 0; IndexClean < Config->Kernel.Add.Count; IndexClean++) {
+        if (mOcInjectedKexts[IndexClean] != NULL) {
+          FreePool (mOcInjectedKexts[IndexClean]);
+        }
       }
-    }
     FreePool (mOcInjectedKexts);
 
     return EFI_OUT_OF_RESOURCES;
@@ -671,12 +678,22 @@ OcKernelProcessExtensionsDir (
   // Only process injected extensions.
   //
   BundleName = StrStr (FileName, L"Oc");
-  KextExtension = StrStr (FileName, L".kext");
-  if (BundleName == NULL || KextExtension == NULL) {
+  if (BundleName == NULL) {
     return EFI_NOT_FOUND;
   }
-  BundlePath = KextExtension + StrLen (L".kext");
+  KextExtension = StrStr (BundleName, L".kext");
+  if (KextExtension == NULL) {
+    return EFI_NOT_FOUND;
+  }
+  BundlePath = KextExtension + L_STR_LEN (L".kext");
   BundleLength = BundlePath - BundleName;
+
+  //
+  // Ensure our mapping array is valid.
+  //
+  if (mOcInjectedKexts == NULL) {
+    return EFI_NOT_FOUND;
+  }
 
   //
   // Find matching kernel extension.
@@ -693,10 +710,10 @@ OcKernelProcessExtensionsDir (
         //
         // Calculate and allocate entry for Contents.
         //
-        ContentsInfoEntrySize = SIZE_OF_EFI_FILE_INFO + StrSize (L"Info.plist");
-        ContentsMacOsEntrySize = SIZE_OF_EFI_FILE_INFO + StrSize (L"MacOS");
-        BufferSize = ContentsInfoEntrySize + ContentsMacOsEntrySize + ALIGN_VALUE (ContentsInfoEntrySize, OC_ALIGNOF (EFI_FILE_INFO));
-        Buffer = AllocateZeroPool (BufferSize); // UNALIGNED?
+        ContentsInfoEntrySize = SIZE_OF_EFI_FILE_INFO + L_STR_SIZE (L"Info.plist");
+        ContentsMacOsEntrySize = SIZE_OF_EFI_FILE_INFO + L_STR_SIZE (L"MacOS");
+        BufferSize = ALIGN_VALUE (ContentsInfoEntrySize, OC_ALIGNOF (EFI_FILE_INFO)) + ContentsMacOsEntrySize;
+        Buffer = AllocateZeroPool (BufferSize);
         if (Buffer == NULL) {
           return EFI_OUT_OF_RESOURCES;
         }
@@ -706,7 +723,7 @@ OcKernelProcessExtensionsDir (
         //
         FileInfo = (EFI_FILE_INFO*)Buffer;
         FileInfo->Size = ContentsInfoEntrySize;
-        CopyMem (FileInfo->FileName, L"Info.plist", StrSize (L"Info.plist"));
+        CopyMem (FileInfo->FileName, L"Info.plist", L_STR_SIZE (L"Info.plist"));
         FileInfo->Attribute = EFI_FILE_READ_ONLY;
         FileInfo->PhysicalSize = FileInfo->FileSize = Kext->PlistDataSize;
 
@@ -715,14 +732,14 @@ OcKernelProcessExtensionsDir (
         //
         FileInfo = (EFI_FILE_INFO*)(Buffer + ALIGN_VALUE (ContentsInfoEntrySize, OC_ALIGNOF (EFI_FILE_INFO)));
         FileInfo->Size = ContentsMacOsEntrySize;
-        CopyMem (FileInfo->FileName, L"MacOS", StrSize (L"MacOS"));
+        CopyMem (FileInfo->FileName, L"MacOS", L_STR_SIZE (L"MacOS"));
         FileInfo->Attribute = EFI_FILE_READ_ONLY | EFI_FILE_DIRECTORY;
-        FileInfo->PhysicalSize = FileInfo->FileSize = SIZE_OF_EFI_FILE_INFO + StrSize (L"binaryhere");
+        FileInfo->PhysicalSize = FileInfo->FileSize = SIZE_OF_EFI_FILE_INFO + L_STR_SIZE (L"BINARY");
 
         //
         // Create virtual Contents directory.
         //
-        FileNameCopy = AllocateCopyPool (StrSize (L"Contents"), L"Contents");
+        FileNameCopy = AllocateCopyPool (L_STR_SIZE (L"Contents"), L"Contents");
         if (FileNameCopy == NULL) {
           DEBUG ((DEBUG_WARN, "Failed to allocate Contents directory name (%a) copy\n", FileName));
           FreePool (Buffer);
