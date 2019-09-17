@@ -29,6 +29,8 @@ STATIC OC_GLOBAL_CONFIG    *mOcConfiguration;
 STATIC OC_CPU_INFO         *mOcCpuInfo;
 
 STATIC CHAR16              **mOcInjectedKexts;
+STATIC CHAR16              **mOcPatchedKexts;
+STATIC CHAR16              **mOcBlockedKexts;
 
 STATIC
 VOID
@@ -167,6 +169,64 @@ OcKernelLoadKextsAndReserve (
 }
 
 STATIC
+RETURN_STATUS
+OcKernelApplyPatch (
+  IN PATCHER_CONTEXT       *Patcher,
+  IN OC_KERNEL_PATCH_ENTRY *UserPatch
+  )
+{
+  PATCHER_GENERIC_PATCH  Patch;
+
+  ASSERT (Patcher != NULL);
+  ASSERT (UserPatch != NULL);
+
+  //
+  // Ignore patch if:
+  // - There is nothing to replace.
+  // - We have neither symbolic base, nor find data.
+  // - Find and replace mismatch in size.
+  // - Mask and ReplaceMask mismatch in size when are available.
+  //
+  if (UserPatch->Replace.Size == 0
+    || (OC_BLOB_GET (&UserPatch->Base)[0] == '\0' && UserPatch->Find.Size != UserPatch->Replace.Size)
+    || (UserPatch->Mask.Size > 0 && UserPatch->Find.Size != UserPatch->Mask.Size)
+    || (UserPatch->ReplaceMask.Size > 0 && UserPatch->Find.Size != UserPatch->ReplaceMask.Size)) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  ZeroMem (&Patch, sizeof (Patch));
+
+  if (OC_BLOB_GET (&UserPatch->Comment)[0] != '\0') {
+    Patch.Comment  = OC_BLOB_GET (&UserPatch->Comment);
+  }
+
+  if (OC_BLOB_GET (&UserPatch->Base)[0] != '\0') {
+    Patch.Base  = OC_BLOB_GET (&UserPatch->Base);
+  }
+
+  if (UserPatch->Find.Size > 0) {
+    Patch.Find  = OC_BLOB_GET (&UserPatch->Find);
+  }
+
+  Patch.Replace = OC_BLOB_GET (&UserPatch->Replace);
+
+  if (UserPatch->Mask.Size > 0) {
+    Patch.Mask  = OC_BLOB_GET (&UserPatch->Mask);
+  }
+
+  if (UserPatch->ReplaceMask.Size > 0) {
+    Patch.ReplaceMask = OC_BLOB_GET (&UserPatch->ReplaceMask);
+  }
+
+  Patch.Size    = UserPatch->Replace.Size;
+  Patch.Count   = UserPatch->Count;
+  Patch.Skip    = UserPatch->Skip;
+  Patch.Limit   = UserPatch->Limit;
+
+  return PatcherApplyGenericPatch (Patcher, &Patch);
+}
+
+STATIC
 VOID
 OcKernelApplyPatches (
   IN     OC_GLOBAL_CONFIG  *Config,
@@ -179,7 +239,6 @@ OcKernelApplyPatches (
   EFI_STATUS             Status;
   PATCHER_CONTEXT        Patcher;
   UINT32                 Index;
-  PATCHER_GENERIC_PATCH  Patch;
   OC_KERNEL_PATCH_ENTRY  *UserPatch;
   CONST CHAR8            *Target;
   CONST CHAR8            *MatchKernel;
@@ -240,51 +299,7 @@ OcKernelApplyPatches (
       }
     }
 
-    //
-    // Ignore patch if:
-    // - There is nothing to replace.
-    // - We have neither symbolic base, nor find data.
-    // - Find and replace mismatch in size.
-    // - Mask and ReplaceMask mismatch in size when are available.
-    //
-    if (UserPatch->Replace.Size == 0
-      || (OC_BLOB_GET (&UserPatch->Base)[0] == '\0' && UserPatch->Find.Size != UserPatch->Replace.Size)
-      || (UserPatch->Mask.Size > 0 && UserPatch->Find.Size != UserPatch->Mask.Size)
-      || (UserPatch->ReplaceMask.Size > 0 && UserPatch->Find.Size != UserPatch->ReplaceMask.Size)) {
-      DEBUG ((DEBUG_ERROR, "OC: Kernel patch %u for %a is borked\n", Index, Target));
-      continue;
-    }
-
-    ZeroMem (&Patch, sizeof (Patch));
-
-    if (OC_BLOB_GET (&UserPatch->Comment)[0] != '\0') {
-      Patch.Comment  = OC_BLOB_GET (&UserPatch->Comment);
-    }
-
-    if (OC_BLOB_GET (&UserPatch->Base)[0] != '\0') {
-      Patch.Base  = OC_BLOB_GET (&UserPatch->Base);
-    }
-
-    if (UserPatch->Find.Size > 0) {
-      Patch.Find  = OC_BLOB_GET (&UserPatch->Find);
-    }
-
-    Patch.Replace = OC_BLOB_GET (&UserPatch->Replace);
-
-    if (UserPatch->Mask.Size > 0) {
-      Patch.Mask  = OC_BLOB_GET (&UserPatch->Mask);
-    }
-
-    if (UserPatch->ReplaceMask.Size > 0) {
-      Patch.ReplaceMask = OC_BLOB_GET (&UserPatch->ReplaceMask);
-    }
-
-    Patch.Size    = UserPatch->Replace.Size;
-    Patch.Count   = UserPatch->Count;
-    Patch.Skip    = UserPatch->Skip;
-    Patch.Limit   = UserPatch->Limit;
-
-    Status = PatcherApplyGenericPatch (&Patcher, &Patch);
+    Status = OcKernelApplyPatch (&Patcher, UserPatch);
     DEBUG ((
       EFI_ERROR (Status) ? DEBUG_WARN : DEBUG_INFO,
       "OC: Kernel patcher result %u for %a - %r\n",
@@ -296,7 +311,7 @@ OcKernelApplyPatches (
 
   if (!IsKernelPatch) {
     if (Config->Kernel.Quirks.AppleCpuPmCfgLock) {
-      PatchAppleCpuPmCfgLock (Context);
+     // PatchAppleCpuPmCfgLock (Context);
     }
 
     if (Config->Kernel.Quirks.ExternalDiskIcons) {
@@ -510,7 +525,6 @@ OcKernelBuildExtensionsDir (
 {
   EFI_STATUS           Status;
   EFI_FILE_INFO        *FileInfo;
-  CHAR16               *FileNameCopy;
 
   UINTN                DirectorySize;
   UINTN                DirectoryOffset;
@@ -526,7 +540,7 @@ OcKernelBuildExtensionsDir (
   UINTN                BundleFileNameLength;
 
   //
-  // Allocate array to maintain extension to name mappings.
+  // Allocate array to maintain kext to name mappings.
   // Names are of format OcXXXXXXXX.kext, where XXXXXXXX is a 32-bit hexadecimal number.
   //
   BundleFileNameSize = L_STR_SIZE (L"OcXXXXXXXX.kext");
@@ -537,7 +551,7 @@ OcKernelBuildExtensionsDir (
   }
 
   //
-  // Generate injected kernel extension names and calculate directory size.
+  // Generate injected kext names and calculate directory size.
   //
   FileNameIndex = 0;
   DirectorySize = 0;
@@ -553,7 +567,7 @@ OcKernelBuildExtensionsDir (
     mOcInjectedKexts[Index] = AllocatePool (BundleFileNameSize);
     if (mOcInjectedKexts[Index] == NULL) {
       DEBUG ((DEBUG_WARN, "Failed to allocate injected kext %u name mapping\n", Index));
-      for (IndexClean = 0; IndexClean <= Index; IndexClean++) {
+      for (IndexClean = 0; IndexClean < Index; IndexClean++) {
         if (mOcInjectedKexts[IndexClean] != NULL) {
           FreePool (mOcInjectedKexts[IndexClean]);
         }
@@ -612,25 +626,10 @@ OcKernelBuildExtensionsDir (
     DirectoryOffset += ALIGN_VALUE (SIZE_OF_EFI_FILE_INFO + BundleFileNameSize, OC_ALIGNOF (EFI_FILE_INFO));
   }
 
-  FileNameCopy = AllocateCopyPool (StrSize (FileName), FileName);
-  if (FileNameCopy == NULL) {
-    DEBUG ((DEBUG_WARN, "Failed to allocate dir name (%a) copy\n", FileName));
-    FreePool (DirectoryBuffer);
-    for (IndexClean = 0; IndexClean < Config->Kernel.Add.Count; IndexClean++) {
-        if (mOcInjectedKexts[IndexClean] != NULL) {
-          FreePool (mOcInjectedKexts[IndexClean]);
-        }
-      }
-    FreePool (mOcInjectedKexts);
-
-    return EFI_OUT_OF_RESOURCES;
-  }
-
-  Status = CreateVirtualDir (FileNameCopy, DirectoryBuffer, DirectorySize, NULL, *File, &VirtualFileHandle);
+  Status = CreateVirtualDirFileNameCopy (FileName, DirectoryBuffer, DirectorySize, NULL, *File, &VirtualFileHandle);
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_WARN, "Failed to virtualise dir file (%a)\n", FileName));
     FreePool (DirectoryBuffer);
-    FreePool (FileNameCopy);
     for (IndexClean = 0; IndexClean < Config->Kernel.Add.Count; IndexClean++) {
         if (mOcInjectedKexts[IndexClean] != NULL) {
           FreePool (mOcInjectedKexts[IndexClean]);
@@ -650,14 +649,13 @@ OcKernelBuildExtensionsDir (
 
 STATIC
 EFI_STATUS
-OcKernelProcessExtensionsDir (
+OcKernelInjectExtensionsDir (
   IN  OC_GLOBAL_CONFIG  *Config,
   OUT EFI_FILE_PROTOCOL  **File,
   IN  CHAR16             *FileName
   ) 
 {
   EFI_STATUS          Status;
-  CHAR16              *FileNameCopy;
   EFI_FILE_PROTOCOL   *VirtualFileHandle;
   CHAR16              *RealFileName;
   UINT8               *Buffer;
@@ -696,12 +694,12 @@ OcKernelProcessExtensionsDir (
   }
 
   //
-  // Find matching kernel extension.
+  // Find matching kext.
   //
   for (Index = 0; Index < Config->Kernel.Add.Count; ++Index) {
     if (StrnCmp (BundleName, mOcInjectedKexts[Index], BundleLength) == 0) {
       Kext = Config->Kernel.Add.Values[Index];
-      DEBUG ((DEBUG_INFO, "%s for kext %u requested\n", FileName, Index));
+      DEBUG ((DEBUG_INFO, "Matched kext %u for %s\n", Index, FileName));
 
       //
       // Contents is being requested.
@@ -739,18 +737,10 @@ OcKernelProcessExtensionsDir (
         //
         // Create virtual Contents directory.
         //
-        FileNameCopy = AllocateCopyPool (L_STR_SIZE (L"Contents"), L"Contents");
-        if (FileNameCopy == NULL) {
-          DEBUG ((DEBUG_WARN, "Failed to allocate Contents directory name (%a) copy\n", FileName));
-          FreePool (Buffer);
-          return EFI_OUT_OF_RESOURCES;
-        }
-
-        Status = CreateVirtualDir (FileNameCopy, Buffer, BufferSize, NULL, NULL, &VirtualFileHandle);
+        Status = CreateVirtualDirFileNameCopy (L"Contents", Buffer, BufferSize, NULL, NULL, &VirtualFileHandle);
         if (EFI_ERROR (Status)) {
           DEBUG ((DEBUG_WARN, "Failed to virtualise Contents directory (%a)\n", FileName));
           FreePool (Buffer);
-          FreePool (FileNameCopy);
           return EFI_OUT_OF_RESOURCES;
         }
       } else {
@@ -784,18 +774,10 @@ OcKernelProcessExtensionsDir (
         //
         // Create virtual file.
         //
-        FileNameCopy = AllocateCopyPool (StrSize (RealFileName), RealFileName);
-        if (FileNameCopy == NULL) {
-          DEBUG ((DEBUG_WARN, "Failed to allocate file name (%a) copy\n", FileName));
-          FreePool (Buffer);
-          return EFI_OUT_OF_RESOURCES;
-        }
-
-        Status = CreateVirtualFile (FileNameCopy, Buffer, BufferSize, NULL, &VirtualFileHandle);
+        Status = CreateVirtualFileFileNameCopy (RealFileName, Buffer, BufferSize, NULL, &VirtualFileHandle);
         if (EFI_ERROR (Status)) {
           DEBUG ((DEBUG_WARN, "Failed to virtualise file (%a)\n", FileName));
           FreePool (Buffer);
-          FreePool (FileNameCopy);
           return EFI_OUT_OF_RESOURCES;
         }
       }
@@ -814,6 +796,401 @@ OcKernelProcessExtensionsDir (
 
 STATIC
 EFI_STATUS
+OcKernelInitExtensionsPatcher (
+  IN EFI_FILE_PROTOCOL    *File,
+  OUT UINT8               **Buffer,
+  OUT UINT32              *BufferSize,
+  IN OUT PATCHER_CONTEXT  *Patcher
+  )
+{
+  EFI_STATUS Status;
+  UINT8 *FileBuffer;
+  UINT32 FileSize;
+  PATCHER_CONTEXT FilePatcher;
+
+  ASSERT (Buffer != NULL);
+  ASSERT (BufferSize != NULL);
+  ASSERT (Patcher != NULL);
+
+  if (*Buffer != NULL) {
+    return EFI_SUCCESS;
+  }
+
+  Status = AllocateCopyFileData (File, &FileBuffer, &FileSize);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  Status = PatcherInitContextFromBuffer (&FilePatcher, FileBuffer, FileSize);
+  if (EFI_ERROR (Status)) {
+    FreePool (FileBuffer);
+    return Status;
+  }
+
+  *Buffer = FileBuffer;
+  *BufferSize = FileSize;
+  CopyMem (Patcher, &FilePatcher, sizeof (PATCHER_CONTEXT));
+  return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+OcKernelProcessExtensionsDir (
+  IN  OC_GLOBAL_CONFIG     *Config,
+  IN OUT EFI_FILE_PROTOCOL **File,
+  IN  CHAR16               *FileName
+  ) 
+{
+  EFI_STATUS             Status;
+  CHAR16                 *ResultStr;
+  EFI_FILE_PROTOCOL      *VirtualFileHandle;
+  EFI_TIME               ModificationTime;
+
+  UINT32                 Index;
+  OC_KERNEL_PATCH_ENTRY  *UserPatch;
+  OC_KERNEL_BLOCK_ENTRY  *UserBlock;
+  CONST CHAR8            *Target;
+  PATCHER_CONTEXT        Patcher;
+
+  UINT8               *Buffer;
+  UINT32              BufferSize;
+
+  XML_DOCUMENT        *PlistDoc;
+  XML_NODE            *PlistRoot;
+  UINT32              PlistChildCount;
+  XML_NODE            *PlistChildKey;
+  XML_NODE            *PlistChildValue;
+  CONST CHAR8         *PlistChildKeyStr;
+  UINT32              PlistChildStrSize;
+
+  CHAR8               *BundleName;
+  CHAR8               *BinaryName;
+
+
+  STATIC CHAR16       *AppleIntelCpuPmBinaryName = NULL;
+
+  Buffer = NULL;
+
+  //
+  // Parse Info.plist
+  //
+  if ((ResultStr = StrStr (FileName, L"Info.plist")) != NULL
+    && StrLen (ResultStr) == L_STR_LEN (L"Info.plist")) {
+    //
+    // Read plist data.
+    //
+    Status = AllocateCopyFileData (*File, &Buffer, &BufferSize);
+    if (EFI_ERROR (Status)) {
+      return Status;
+    }
+
+    //
+    // Initialize plist XML.
+    //
+    PlistDoc = XmlDocumentParse ((CHAR8*)Buffer, BufferSize, FALSE);
+    if (PlistDoc == NULL) {
+      FreePool (Buffer);
+      return EFI_DEVICE_ERROR;
+    }
+    PlistRoot = PlistDocumentRoot (PlistDoc);
+    if (PlistRoot == NULL) {
+      FreePool (PlistDoc);
+      FreePool (Buffer);
+      return EFI_DEVICE_ERROR;
+    }
+
+    //
+    // Iterate through children and pick out bundle ID and executable name.
+    //
+    BundleName = NULL;
+    BinaryName = NULL;
+    PlistChildCount = PlistDictChildren (PlistRoot);
+    for (UINT32 i = 0; i < PlistChildCount; i++) {
+      PlistChildKey = PlistDictChild (PlistRoot, i, &PlistChildValue);
+      PlistChildKeyStr = PlistKeyValue (PlistChildKey);
+      if (PlistChildKeyStr != NULL) {
+        //
+        // Get bundle name.
+        //
+        if (AsciiStrCmp (PlistChildKeyStr, "CFBundleIdentifier") == 0) {
+          if (!PlistStringSize (PlistChildValue, &PlistChildStrSize)) {
+            if (BinaryName != NULL) {
+              FreePool (BinaryName);
+            }
+            FreePool (PlistDoc);
+            FreePool (Buffer);
+
+            //
+            // Returning an error here would prevent the kext from being properly loaded.
+            // If this value is not a string it only prevents patching.
+            //
+            return EFI_SUCCESS;
+          }
+
+          BundleName = AllocateZeroPool (PlistChildStrSize);
+          if (BundleName == NULL) {
+            if (BinaryName != NULL) {
+              FreePool (BinaryName);
+            }
+            FreePool (PlistDoc);
+            FreePool (Buffer);
+            return EFI_OUT_OF_RESOURCES;
+          }
+          if (!PlistStringValue (PlistChildValue, BundleName, &PlistChildStrSize)) {
+            if (BinaryName != NULL) {
+              FreePool (BinaryName);
+            }
+            FreePool (BundleName);
+            FreePool (PlistDoc);
+            FreePool (Buffer);
+            return EFI_DEVICE_ERROR;
+          }
+        //
+        // Get binary name.
+        //
+        } else if (AsciiStrCmp (PlistChildKeyStr, "CFBundleExecutable") == 0) {
+          if (!PlistStringSize (PlistChildValue, &PlistChildStrSize)) {
+            if (BundleName != NULL) {
+              FreePool (BundleName);
+            }
+            FreePool (PlistDoc);
+            FreePool (Buffer);
+
+            //
+            // Returning an error here would prevent the kext from being properly loaded.
+            // If this value is not a string it only prevents patching.
+            //
+            return EFI_SUCCESS;
+          }
+
+          BinaryName = AllocateZeroPool (PlistChildStrSize);
+          if (BinaryName == NULL) {
+            if (BundleName != NULL) {
+              FreePool (BundleName);
+            }
+            FreePool (PlistDoc);
+            FreePool (Buffer);
+            return EFI_OUT_OF_RESOURCES;
+          }
+          if (!PlistStringValue (PlistChildValue, BinaryName, &PlistChildStrSize)) {
+            if (BundleName != NULL) {
+              FreePool (BundleName);
+            }
+            FreePool (BinaryName);
+            FreePool (PlistDoc);
+            FreePool (Buffer);
+            return EFI_DEVICE_ERROR;
+          }
+        }
+      }
+
+      //
+      // Can finish early if both strings are found already.
+      //
+      if (BundleName != NULL && BinaryName != NULL) {
+        break;
+      }
+    }
+    FreePool (PlistDoc);
+    FreePool (Buffer);
+
+    //
+    // If one or both values were not found, this simply prevents patching and is not an error.
+    // Some codeless kexts exist in /S/L/E.
+    //
+    if (BundleName == NULL || BinaryName == NULL) {
+      if (BundleName != NULL) {
+        FreePool (BundleName);
+      }
+      if (BinaryName != NULL) {
+        FreePool (BinaryName);
+      }
+      return EFI_SUCCESS;
+    }
+
+    //
+    // Allocate array for storing kext binaries for kexts to patch and block.
+    //
+    if (mOcPatchedKexts == NULL) {
+      mOcPatchedKexts = AllocateZeroPool (Config->Kernel.Patch.Count * sizeof (CHAR16*));
+      if (mOcPatchedKexts == NULL) {
+        return EFI_OUT_OF_RESOURCES;
+      }
+    }
+    if (mOcBlockedKexts == NULL) {
+      mOcBlockedKexts = AllocateZeroPool (Config->Kernel.Block.Count * sizeof (CHAR16*));
+      if (mOcBlockedKexts == NULL) {
+        return EFI_OUT_OF_RESOURCES;
+      }
+    }
+
+    //
+    // Store binary name for patching later on.
+    //
+    for (Index = 0; Index < Config->Kernel.Patch.Count; Index++) {
+      UserPatch = Config->Kernel.Patch.Values[Index];
+      Target    = OC_BLOB_GET (&UserPatch->Identifier);
+
+      if (!UserPatch->Enabled || (AsciiStrCmp (Target, "kernel") == 0)) {
+        continue;
+      }
+
+      if (AsciiStrCmp (Target, BundleName) == 0) {
+        mOcPatchedKexts[Index] = AsciiStrCopyToUnicode (BinaryName, 0);
+        if (mOcPatchedKexts[Index] == NULL) {
+          FreePool (BundleName);
+          FreePool (BinaryName);
+          return EFI_OUT_OF_RESOURCES;
+        }
+        DEBUG ((DEBUG_INFO, "OC: Stored patch request %s for kext %u\n", mOcPatchedKexts[Index], Index));
+      }
+    }
+
+    //
+    // Store binary names for built-in patches.
+    //
+    if (Config->Kernel.Quirks.AppleCpuPmCfgLock 
+    && AsciiStrCmp (BundleName, "com.apple.driver.AppleIntelCPUPowerManagement") == 0) {
+      AppleIntelCpuPmBinaryName = AsciiStrCopyToUnicode (BinaryName, 0);
+    }
+
+    //
+    // Store binary name for blocking later on.
+    //
+    for (Index = 0; Index < Config->Kernel.Block.Count; Index++) {
+      UserBlock = Config->Kernel.Block.Values[Index];
+      Target    = OC_BLOB_GET (&UserBlock->Identifier);
+
+      if (!UserBlock->Enabled) {
+        continue;
+      }
+
+      if (AsciiStrCmp (Target, BundleName) == 0) {
+        mOcBlockedKexts[Index] = AsciiStrCopyToUnicode (BinaryName, 0);
+        if (mOcBlockedKexts[Index] == NULL) {
+          FreePool (BundleName);
+          FreePool (BinaryName);
+          return EFI_OUT_OF_RESOURCES;
+        }
+        DEBUG ((DEBUG_INFO, "OC: Stored block request %s for kext %u\n", mOcBlockedKexts[Index], Index));
+      }
+    }
+
+    FreePool (BundleName);
+    FreePool (BinaryName);
+
+  //
+  // Patch and/or block binary.
+  //
+  } else if ((ResultStr = StrStr (FileName, L"MacOS\\")) != NULL) {
+    if (StrLen (ResultStr) == L_STR_LEN (L"MacOS\\")) {
+      return EFI_DEVICE_ERROR;
+    }
+    ResultStr += L_STR_LEN (L"MacOS\\");
+
+    //
+    // Process patches.
+    //
+    for (Index = 0; Index < Config->Kernel.Patch.Count; Index++) {
+      UserPatch = Config->Kernel.Patch.Values[Index];
+      Target    = OC_BLOB_GET (&UserPatch->Identifier);
+
+      if (mOcPatchedKexts[Index] == NULL) {
+        continue;
+      }
+
+      if (StrCmp (ResultStr, mOcPatchedKexts[Index]) == 0) {
+        Status = OcKernelInitExtensionsPatcher (*File, &Buffer, &BufferSize, &Patcher);
+        if (EFI_ERROR (Status)) {
+          DEBUG ((DEBUG_WARN, "OC: Patcher %a init failure - %r\n", Target, Status));
+          break;
+        }
+
+        Status = OcKernelApplyPatch (&Patcher, UserPatch);
+        DEBUG ((
+          EFI_ERROR (Status) ? DEBUG_WARN : DEBUG_INFO,
+          "OC: Kernel patcher result %u for %a - %r\n",
+          Index,
+          Target,
+          Status
+          ));
+      }
+    }
+
+    //
+    // Process built-in patches.
+    //
+    if (AppleIntelCpuPmBinaryName != NULL && StrCmp (ResultStr, AppleIntelCpuPmBinaryName) == 0) {
+        Status = OcKernelInitExtensionsPatcher (*File, &Buffer, &BufferSize, &Patcher);
+        if (!EFI_ERROR (Status)) {
+          PatchAppleCpuPmCfgLock (&Patcher);
+        }
+    }
+
+    //
+    // Process blocks. TODO: Currently fails with EFI_UNSUPPORTED.
+    //
+    for (Index = 0; Index < Config->Kernel.Block.Count; Index++) {
+      UserBlock = Config->Kernel.Block.Values[Index];
+      Target    = OC_BLOB_GET (&UserBlock->Identifier);
+
+      if (mOcBlockedKexts[Index] == NULL) {
+        continue;
+      }
+
+      if (StrCmp (ResultStr, mOcBlockedKexts[Index]) == 0) {
+        Status = OcKernelInitExtensionsPatcher (*File, &Buffer, &BufferSize, &Patcher);
+        if (EFI_ERROR (Status)) {
+          DEBUG ((DEBUG_WARN, "OC: Patcher %a init failure - %r\n", Target, Status));
+          break;
+        }
+
+        //
+        // Block kext.
+        //
+        Status = PatcherBlockKext (&Patcher);
+        DEBUG ((
+          EFI_ERROR (Status) ? DEBUG_WARN : DEBUG_INFO,
+          "OC: Blocker %a - %r\n",
+          Target,
+          Status
+          ));
+      }
+    }
+
+    //
+    // Create virtual file if binary was modified.
+    //
+    if (Buffer != NULL) {
+      Status = GetFileModifcationTime (*File, &ModificationTime);
+      if (EFI_ERROR (Status)) {
+        ZeroMem (&ModificationTime, sizeof (ModificationTime));
+      }
+
+      (*File)->Close(*File);
+
+      //
+      // This was our file, yet firmware is dying.
+      //
+      Status = CreateVirtualFileFileNameCopy (FileName, Buffer, BufferSize, &ModificationTime, &VirtualFileHandle);
+      if (EFI_ERROR (Status)) {
+        DEBUG ((DEBUG_WARN, "Failed to virtualise kext file (%a)\n", FileName));
+        FreePool (Buffer);
+        return EFI_OUT_OF_RESOURCES;
+      }
+
+      //
+      // Return our handle.
+      //
+      *File = VirtualFileHandle;
+    }
+  }
+  
+  return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
 EFIAPI
 OcKernelFileOpen (
   IN  EFI_FILE_PROTOCOL       *This,
@@ -827,26 +1204,28 @@ OcKernelFileOpen (
   UINT8              *Kernel;
   UINT32             KernelSize;
   UINT32             AllocatedSize;
-  CHAR16             *FileNameCopy;
   EFI_FILE_PROTOCOL  *VirtualFileHandle;
   EFI_STATUS         PrelinkedStatus;
   EFI_TIME           ModificationTime;
   CHAR8              DarwinVersion[16];
 
+  //
+  // Hook injected OcXXXXXXXX.kext reads from /S/L/E.
+  //
   if (OpenMode == EFI_FILE_MODE_READ
-    && StrStr (FileName, L"System\\Library\\Extensions\\Oc") != NULL
-    && StrStr (FileName, L".kext\\Contents") != NULL) {
-    Status = OcKernelProcessExtensionsDir (mOcConfiguration, NewHandle, FileName);
+    && StrnCmp (FileName, L"System\\Library\\Extensions\\Oc", L_STR_LEN (L"System\\Library\\Extensions\\Oc")) == 0) {
+    Status = OcKernelInjectExtensionsDir (mOcConfiguration, NewHandle, FileName);
     DEBUG ((
-    DEBUG_INFO,
-    "Opening injected file %s with %u mode gave - %r\n",
-    FileName,
-    (UINT32) OpenMode,
-    Status
-    ));
+      DEBUG_INFO,
+      "Opening injected file %s with %u mode gave - %r\n",
+      FileName,
+      (UINT32) OpenMode,
+      Status
+      ));
 
     return Status;
   }
+
 
   Status = This->Open (This, NewHandle, FileName, OpenMode, Attributes);
 
@@ -861,6 +1240,51 @@ OcKernelFileOpen (
   if (EFI_ERROR (Status)) {
     return Status;
   }
+
+  //
+  // 
+  //
+
+  // Patch cppm
+ /* if (OpenMode == EFI_FILE_MODE_READ
+    && StrCmp (FileName, L"System\\Library\\Extensions\\AppleIntelCPUPowerManagement.kext\\Contents\\MacOS\\AppleIntelCPUPowerManagement") == 0) {
+    DEBUG ((DEBUG_INFO, "patch cpupm\n"));
+    GetFileSize (*NewHandle, &KernelSize);
+    Kernel = AllocatePool (KernelSize);
+    GetFileData (*NewHandle, 0, KernelSize, Kernel);
+
+    PATCHER_CONTEXT pContext;
+    PatcherInitContextFromBuffer (&pContext, Kernel, KernelSize);
+    PatchAppleCpuPmCfgLock (&pContext);
+
+      Status = GetFileModifcationTime (*NewHandle, &ModificationTime);
+      if (EFI_ERROR (Status)) {
+        ZeroMem (&ModificationTime, sizeof (ModificationTime));
+      }
+
+      (*NewHandle)->Close(*NewHandle);
+
+      //
+      // This was our file, yet firmware is dying.
+      //
+      Status = CreateVirtualFileFileNameCopy (FileName, Kernel, KernelSize, &ModificationTime, &VirtualFileHandle);
+      if (EFI_ERROR (Status)) {
+        DEBUG ((DEBUG_WARN, "Failed to virtualise kernel file (%a)\n", FileName));
+        FreePool (Kernel);
+        return EFI_OUT_OF_RESOURCES;
+      }
+
+      //
+      // Return our handle.
+      //
+      *NewHandle = VirtualFileHandle;
+      return EFI_SUCCESS;
+
+    return EFI_SUCCESS;
+
+
+  }*/
+
 
   //
   // boot.efi uses /S/L/K/kernel as is to determine valid filesystem.
@@ -908,18 +1332,10 @@ OcKernelFileOpen (
       //
       // This was our file, yet firmware is dying.
       //
-      FileNameCopy = AllocateCopyPool (StrSize (FileName), FileName);
-      if (FileNameCopy == NULL) {
-        DEBUG ((DEBUG_WARN, "Failed to allocate kernel name (%a) copy\n", FileName));
-        FreePool (Kernel);
-        return EFI_OUT_OF_RESOURCES;
-      }
-
-      Status = CreateVirtualFile (FileNameCopy, Kernel, KernelSize, &ModificationTime, &VirtualFileHandle);
+      Status = CreateVirtualFileFileNameCopy (FileName, Kernel, KernelSize, &ModificationTime, &VirtualFileHandle);
       if (EFI_ERROR (Status)) {
         DEBUG ((DEBUG_WARN, "Failed to virtualise kernel file (%a)\n", FileName));
         FreePool (Kernel);
-        FreePool (FileNameCopy);
         return EFI_OUT_OF_RESOURCES;
       }
 
@@ -932,13 +1348,26 @@ OcKernelFileOpen (
   }
 
   //
-  // Hook /S/L/E and provide overlay virtual directory for injected kexts.
+  // Hook /S/L/E and provide virtual directory overlay for injected kexts.
   //
   if (OpenMode == EFI_FILE_MODE_READ
     && StrCmp (FileName, L"System\\Library\\Extensions") == 0) {
-      DEBUG ((DEBUG_INFO, "Hooking into SLE folder\n"));
-      OcKernelLoadKextsAndReserve (mOcStorage, mOcConfiguration);
-      return OcKernelBuildExtensionsDir (mOcConfiguration, NewHandle, FileName);
+    DEBUG ((DEBUG_INFO, "Hooking into /S/L/E directory\n"));
+
+    //
+    // Load kexts into memory and build directory.
+    //
+    OcKernelLoadKextsAndReserve (mOcStorage, mOcConfiguration);
+    return OcKernelBuildExtensionsDir (mOcConfiguration, NewHandle, FileName);
+  }
+
+  //
+  // Hook /S/L/E kext binary reads for pre-existing kexts.
+  // This allows for patching/blocking.
+  //
+  if (OpenMode == EFI_FILE_MODE_READ
+    && StrnCmp (FileName, L"System\\Library\\Extensions\\", L_STR_LEN (L"System\\Library\\Extensions\\")) == 0) {
+    return OcKernelProcessExtensionsDir (mOcConfiguration, NewHandle, FileName);
   }
 
   //
