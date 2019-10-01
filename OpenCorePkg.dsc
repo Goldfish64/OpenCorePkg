@@ -103,6 +103,12 @@
 
 [PcdsFixedAtBuild]
   gEfiMdePkgTokenSpaceGuid.PcdMaximumAsciiStringLength|0
+
+  # Default serial baud of 115200
+  gEfiMdeModulePkgTokenSpaceGuid.PcdSerialBaudRate|115200
+  gEfiMdeModulePkgTokenSpaceGuid.PcdSerialClockRate|1843200
+  gEfiMdeModulePkgTokenSpaceGuid.PcdSerialFifoControl|0
+
 !if $(TARGET) == RELEASE
   # DEBUG_PRINT_ENABLED
   gEfiMdePkgTokenSpaceGuid.PcdDebugPropertyMask|2

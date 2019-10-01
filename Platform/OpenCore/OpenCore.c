@@ -39,6 +39,8 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include <Library/UefiDriverEntryPoint.h>
 #include <Library/UefiLib.h>
 
+#include <Library/SerialPortLib.h>
+
 STATIC
 OC_GLOBAL_CONFIG
 mOpenCoreConfiguration;
@@ -228,6 +230,7 @@ UefiMain (
   OC_BOOTSTRAP_PROTOCOL             *Bootstrap;
   EFI_DEVICE_PATH_PROTOCOL          *AbsPath;
 
+  SerialPortInitialize();
   DEBUG ((DEBUG_INFO, "OC: Starting OpenCore...\n"));
 
   //
