@@ -339,6 +339,7 @@ VOID
 OcMiscBoot (
   IN  OC_STORAGE_CONTEXT        *Storage,
   IN  OC_GLOBAL_CONFIG          *Config,
+  IN  OC_PRIVILEGE_CONTEXT      *Privilege OPTIONAL,
   IN  OC_IMAGE_START            StartImage,
   IN  BOOLEAN                   CustomBootGuid,
   IN  EFI_HANDLE                LoadHandle OPTIONAL
@@ -449,6 +450,8 @@ OcMiscBoot (
   Context->ExcludeHandle      = LoadHandle;
   Context->CustomEntryContext = Storage;
   Context->CustomRead         = OcToolLoadEntry;
+  Context->PrivilegeContext   = Privilege;
+  Context->RequestPrivilege   = OcShowSimplePasswordRequest;
 
   if (Config->Misc.Boot.ShowPicker) {
     PickerCommand = Context->PickerCommand = OcPickerShowPicker;
@@ -458,8 +461,9 @@ OcMiscBoot (
 
   for (Index = 0, EntryIndex = 0; Index < Config->Misc.Entries.Count; ++Index) {
     if (Config->Misc.Entries.Values[Index]->Enabled) {
-      Context->CustomEntries[EntryIndex].Name = OC_BLOB_GET (&Config->Misc.Entries.Values[Index]->Name);
-      Context->CustomEntries[EntryIndex].Path = OC_BLOB_GET (&Config->Misc.Entries.Values[Index]->Path);
+      Context->CustomEntries[EntryIndex].Name      = OC_BLOB_GET (&Config->Misc.Entries.Values[Index]->Name);
+      Context->CustomEntries[EntryIndex].Path      = OC_BLOB_GET (&Config->Misc.Entries.Values[Index]->Path);
+      Context->CustomEntries[EntryIndex].Arguments = OC_BLOB_GET (&Config->Misc.Entries.Values[Index]->Arguments);
       ++EntryIndex;
     }
   }
@@ -471,8 +475,9 @@ OcMiscBoot (
   //
   for (Index = 0; Index < Config->Misc.Tools.Count; ++Index) {
     if (Config->Misc.Tools.Values[Index]->Enabled) {
-      Context->CustomEntries[EntryIndex].Name = OC_BLOB_GET (&Config->Misc.Tools.Values[Index]->Name);
-      Context->CustomEntries[EntryIndex].Path = OC_BLOB_GET (&Config->Misc.Tools.Values[Index]->Path);
+      Context->CustomEntries[EntryIndex].Name      = OC_BLOB_GET (&Config->Misc.Tools.Values[Index]->Name);
+      Context->CustomEntries[EntryIndex].Path      = OC_BLOB_GET (&Config->Misc.Tools.Values[Index]->Path);
+      Context->CustomEntries[EntryIndex].Arguments = OC_BLOB_GET (&Config->Misc.Tools.Values[Index]->Arguments);
       ++EntryIndex;
     }
   }
