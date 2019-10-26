@@ -28,7 +28,7 @@
   OpenCore version reported to log and NVRAM.
   OPEN_CORE_VERSION must follow X.Y.Z format, where X.Y.Z are single digits.
 **/
-#define OPEN_CORE_VERSION          "0.5.1"
+#define OPEN_CORE_VERSION          "0.5.2"
 
 /**
   OpenCore build type reported to log and NVRAM.
@@ -168,6 +168,27 @@ OcLoadUefiSupport (
   IN OC_STORAGE_CONTEXT  *Storage,
   IN OC_GLOBAL_CONFIG    *Config,
   IN OC_CPU_INFO         *CpuInfo
+  );
+
+/**
+  Decide whether console controller reconnection is required
+  upon changing screen resolution.
+
+  @param[in]  Config    OpenCore configuration.
+**/
+BOOLEAN
+OcShouldReconnectConsoleOnResolutionChange (
+  IN OC_GLOBAL_CONFIG  *Config
+  );
+
+/**
+  Get human readable version string.
+
+  @retval null-terminated 7-bit ASCII version string.
+**/
+CONST CHAR8 *
+OcMiscGetVersionString (
+  VOID
   );
 
 /**

@@ -326,6 +326,7 @@ OcReinstallProtocols (
   }
 }
 
+STATIC
 BOOLEAN
 OcLoadUefiInputSupport (
   IN OC_GLOBAL_CONFIG  *Config
@@ -345,7 +346,7 @@ OcLoadUefiInputSupport (
   if (TimerResolution != 0) {
     Status = OcAppleGenericInputTimerQuirkInit (TimerResolution);
     if (EFI_ERROR (Status)) {
-      DEBUG ((DEBUG_ERROR, "OCGI: Failed to initialize timer quirk\n"));
+      DEBUG ((DEBUG_ERROR, "OC: Failed to initialize timer quirk\n"));
     } else {
       ExitBs = TRUE;
     }
@@ -363,7 +364,7 @@ OcLoadUefiInputSupport (
     if (PointerMode != OcInputPointerModeMax) {
       Status = OcAppleGenericInputPointerInit (PointerMode);
       if (EFI_ERROR (Status)) {
-        DEBUG ((DEBUG_ERROR, "OCGI: Failed to initialize pointer\n"));
+        DEBUG ((DEBUG_ERROR, "OC: Failed to initialize pointer\n"));
       } else {
         ExitBs = TRUE;
       }
@@ -389,10 +390,11 @@ OcLoadUefiInputSupport (
       Status = OcAppleGenericInputKeycodeInit (
                  KeyMode,
                  Config->Uefi.Input.KeyForgetThreshold,
-                 Config->Uefi.Input.KeyMergeThreshold
+                 Config->Uefi.Input.KeyMergeThreshold,
+                 Config->Uefi.Input.KeySwap
                  );
       if (EFI_ERROR (Status)) {
-        DEBUG ((DEBUG_ERROR, "OCGI: Failed to initialize keycode\n"));
+        DEBUG ((DEBUG_ERROR, "OC: Failed to initialize keycode\n"));
       } else {
         ExitBs = TRUE;
       }
@@ -402,12 +404,22 @@ OcLoadUefiInputSupport (
   return ExitBs;
 }
 
+BOOLEAN
+OcShouldReconnectConsoleOnResolutionChange (
+  IN OC_GLOBAL_CONFIG  *Config
+  )
+{
+  return Config->Uefi.Quirks.ReconnectOnResChange;
+}
+
 VOID
 OcLoadBooterUefiSupport (
   IN OC_GLOBAL_CONFIG  *Config
   )
 {
   OC_ABC_SETTINGS  AbcSettings;
+  UINT32           Index;
+  UINT32           NextIndex;
 
   ZeroMem (&AbcSettings, sizeof (AbcSettings));
 
@@ -423,6 +435,30 @@ OcLoadBooterUefiSupport (
   AbcSettings.ProvideCustomSlide     = Config->Booter.Quirks.ProvideCustomSlide;
   AbcSettings.SetupVirtualMap        = Config->Booter.Quirks.SetupVirtualMap;
   AbcSettings.ShrinkMemoryMap        = Config->Booter.Quirks.ShrinkMemoryMap;
+
+  if (AbcSettings.DevirtualiseMmio && Config->Booter.MmioWhitelist.Count > 0) {
+    AbcSettings.MmioWhitelist = AllocatePool (
+      Config->Booter.MmioWhitelist.Count * sizeof (AbcSettings.MmioWhitelist[0])
+      );
+
+    if (AbcSettings.MmioWhitelist != NULL) {
+      NextIndex = 0;
+      for (Index = 0; Index < Config->Booter.MmioWhitelist.Count; ++Index) {
+        if (Config->Booter.MmioWhitelist.Values[Index]->Enabled) {
+          AbcSettings.MmioWhitelist[NextIndex] = Config->Booter.MmioWhitelist.Values[Index]->Address;
+          ++NextIndex;
+        }
+      }
+      AbcSettings.MmioWhitelistSize = NextIndex;
+    } else {
+      DEBUG ((
+        DEBUG_ERROR,
+        "OC: Failed to allocate %u slots for mmio addresses\n",
+        (UINT32) Config->Booter.MmioWhitelist.Count
+        ));
+    }
+
+  }
 
   OcAbcInitialize (&AbcSettings);
 }

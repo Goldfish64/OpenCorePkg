@@ -41,6 +41,7 @@ OcParseDarwinVersion (
   )
 {
   UINT32  Version;
+  UINT32  VersionPart;
   UINT32  Index;
   UINT32  Index2;
 
@@ -51,14 +52,26 @@ OcParseDarwinVersion (
   Version = 0;
 
   for (Index = 0; Index < 3; ++Index) {
+    Version *= 100;
+
+    VersionPart = 0;
+
     for (Index2 = 0; Index2 < 2; ++Index2) {
-      Version *= 10;
+      //
+      // Handle single digit parts, i.e. parse 1.2.3 as 010203.
+      //
+      if (*String != '.' && *String != '\0') {
+        VersionPart *= 10;
+      }
+
       if (*String >= '0' && *String <= '9') {
-        Version += *String++ - '0';
+        VersionPart += *String++ - '0';
       } else if (*String != '.' && *String != '\0') {
         return 0;
       }
     }
+
+    Version += VersionPart;
 
     if (*String == '.') {
       ++String;
@@ -122,7 +135,7 @@ OcKernelReadDarwinVersion (
   INT32   Offset;
   UINT32  Index;
   CHAR8   DarwinVersion[32];
-  CHAR8   DarwinVersionInteger;
+  UINT32  DarwinVersionInteger;
 
 
   Offset = FindPattern (
@@ -148,7 +161,7 @@ OcKernelReadDarwinVersion (
     DarwinVersion[Index] = (CHAR8) Kernel[Offset];
   }
   DarwinVersion[Index] = '\0';
-  DarwinVersionInteger = (CHAR8) OcParseDarwinVersion (DarwinVersion);
+  DarwinVersionInteger = OcParseDarwinVersion (DarwinVersion);
 
   DEBUG ((
     DEBUG_INFO,
@@ -373,12 +386,12 @@ OcKernelApplyPatches (
     }
 
     MaxKernel   = OcParseDarwinVersion (OC_BLOB_GET (&UserPatch->MaxKernel));
-    MinKernel   = OcParseDarwinVersion (OC_BLOB_GET (&UserPatch->MaxKernel));
+    MinKernel   = OcParseDarwinVersion (OC_BLOB_GET (&UserPatch->MinKernel));
 
     if (!OcMatchDarwinVersion (DarwinVersion, MinKernel, MaxKernel)) {
       DEBUG ((
         DEBUG_INFO,
-        "OC: Kernel patcher skips %a (%a) patch at %u due to version %u <= %u <= %u",
+        "OC: Kernel patcher skips %a (%a) patch at %u due to version %u <= %u <= %u\n",
         Target,
         Comment,
         Index,
@@ -449,7 +462,7 @@ OcKernelApplyPatches (
     }
 
     if (Config->Kernel.Quirks.PanicNoKextDump) {
-      PatchPanicKextDump (&Patcher);      
+      PatchPanicKextDump (&Patcher);
     }
 
     if (Config->Kernel.Emulate.Cpuid1Data[0] != 0
@@ -466,6 +479,10 @@ OcKernelApplyPatches (
 
     if (Config->Kernel.Quirks.LapicKernelPanic) {
       PatchLapicKernelPanic (&Patcher);
+    }
+
+    if (Config->Kernel.Quirks.PowerTimeoutKernelPanic) {
+      PatchPowerStateTimeout (&Patcher);
     }
   }
 }
@@ -497,12 +514,12 @@ OcKernelBlockKexts (
     }
 
     MaxKernel = OcParseDarwinVersion (OC_BLOB_GET (&Kext->MaxKernel));
-    MinKernel = OcParseDarwinVersion (OC_BLOB_GET (&Kext->MaxKernel));
+    MinKernel = OcParseDarwinVersion (OC_BLOB_GET (&Kext->MinKernel));
 
     if (!OcMatchDarwinVersion (DarwinVersion, MinKernel, MaxKernel)) {
       DEBUG ((
         DEBUG_INFO,
-        "OC: Prelink blocker skips %a (%a) block at %u due to version %u <= %u <= %u",
+        "OC: Prelink blocker skips %a (%a) block at %u due to version %u <= %u <= %u\n",
         Target,
         Comment,
         Index,
@@ -577,12 +594,12 @@ OcKernelProcessPrelinked (
         BundlePath  = OC_BLOB_GET (&Kext->BundlePath);
         Comment     = OC_BLOB_GET (&Kext->Comment);
         MaxKernel   = OcParseDarwinVersion (OC_BLOB_GET (&Kext->MaxKernel));
-        MinKernel   = OcParseDarwinVersion (OC_BLOB_GET (&Kext->MaxKernel));
+        MinKernel   = OcParseDarwinVersion (OC_BLOB_GET (&Kext->MinKernel));
 
         if (!OcMatchDarwinVersion (DarwinVersion, MinKernel, MaxKernel)) {
           DEBUG ((
             DEBUG_INFO,
-            "OC: Prelink injection skips %a (%a) kext at %u due to version %u <= %u <= %u",
+            "OC: Prelink injection skips %a (%a) kext at %u due to version %u <= %u <= %u\n",
             BundlePath,
             Comment,
             Index,

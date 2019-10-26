@@ -1,7 +1,7 @@
 \documentclass[]{article}
 %DIF LATEXDIFF DIFFERENCE FILE
-%DIF DEL PreviousConfiguration.tex   Wed Sep 25 12:29:43 2019
-%DIF ADD ../Configuration.tex        Wed Sep 25 18:18:55 2019
+%DIF DEL PreviousConfiguration.tex   Thu Oct 24 09:22:44 2019
+%DIF ADD ../Configuration.tex        Sat Oct 26 15:45:30 2019
 
 \usepackage{lmodern}
 \usepackage{amssymb,amsmath}
@@ -15,9 +15,7 @@
 \usepackage{longtable,booktabs}
 \usepackage{footnote}
 \usepackage{listings}
-%DIF 15a15
-\usepackage{mathtools} %DIF > 
-%DIF -------
+\usepackage{mathtools}
 \usepackage{parskip}
 \usepackage[margin=0.7in]{geometry}
 \usepackage{titlesec}
@@ -31,16 +29,14 @@
 \tikzstyle{optional}=[dashed,fill=gray!50]
 
 \renewcommand{\dateseparator}{.}
-%DIF 28a29-36
- %DIF > 
-\makeatletter %DIF > 
-\newcommand*{\bdiv}{% %DIF > 
-  \nonscript\mskip-\medmuskip\mkern5mu% %DIF > 
-  \mathbin{\operator@font div}\penalty900\mkern5mu% %DIF > 
-  \nonscript\mskip-\medmuskip %DIF > 
-} %DIF > 
-\makeatother %DIF > 
-%DIF -------
+
+\makeatletter
+\newcommand*{\bdiv}{%
+  \nonscript\mskip-\medmuskip\mkern5mu%
+  \mathbin{\operator@font div}\penalty900\mkern5mu%
+  \nonscript\mskip-\medmuskip
+}
+\makeatother
 
 % Newer LaTeX versions should not add ligatures to listings, but for some reason
 % it is not the case for me. As a result select PDF viewers copy wrong data.
@@ -105,6 +101,8 @@
 \providecommand{\DIFaddend}{\global\booltrue{DIFkeeppage}\global\boolfalse{DIFchange}} %DIF PREAMBLE
 \providecommand{\DIFdelbegin}{\global\booltrue{DIFkeeppage}\global\booltrue{DIFchange}} %DIF PREAMBLE
 \providecommand{\DIFdelend}{\global\booltrue{DIFkeeppage}\global\boolfalse{DIFchange}} %DIF PREAMBLE
+\providecommand{\DIFmodbegin}{\global\booltrue{DIFkeeppage}\global\booltrue{DIFchange}} %DIF PREAMBLE
+\providecommand{\DIFmodend}{\global\booltrue{DIFkeeppage}\global\boolfalse{DIFchange}} %DIF PREAMBLE
 %DIF IDENTICAL PREAMBLE %DIF PREAMBLE
 \providecommand{\DIFaddFL}[1]{\DIFadd{#1}} %DIF PREAMBLE
 \providecommand{\DIFdelFL}[1]{\DIFdel{#1}} %DIF PREAMBLE
@@ -116,17 +114,21 @@
 \providecommand{\DIFadd}[1]{\texorpdfstring{\DIFaddtex{#1}}{#1}} %DIF PREAMBLE
 \providecommand{\DIFdel}[1]{\texorpdfstring{\DIFdeltex{#1}}{}} %DIF PREAMBLE
 %DIF LISTINGS PREAMBLE %DIF PREAMBLE
-\lstdefinelanguage{codediff}{ %DIF PREAMBLE
-  moredelim=**[is][\color{red}]{*!----}{----!*}, %DIF PREAMBLE
-  moredelim=**[is][\color{blue}]{*!++++}{++++!*} %DIF PREAMBLE
+\RequirePackage{listings} %DIF PREAMBLE
+\RequirePackage{color} %DIF PREAMBLE
+\lstdefinelanguage{DIFcode}{ %DIF PREAMBLE
+%DIF DIFCODE_UNDERLINE %DIF PREAMBLE
+  moredelim=[il][\color{red}\sout]{\%DIF\ <\ }, %DIF PREAMBLE
+  moredelim=[il][\color{blue}\uwave]{\%DIF\ >\ } %DIF PREAMBLE
 } %DIF PREAMBLE
-\lstdefinestyle{codediff}{ %DIF PREAMBLE
-	belowcaptionskip=.25\baselineskip, %DIF PREAMBLE
-	language=codediff, %DIF PREAMBLE
+\lstdefinestyle{DIFverbatimstyle}{ %DIF PREAMBLE
+	language=DIFcode, %DIF PREAMBLE
 	basicstyle=\ttfamily, %DIF PREAMBLE
 	columns=fullflexible, %DIF PREAMBLE
-	keepspaces=true, %DIF PREAMBLE
+	keepspaces=true %DIF PREAMBLE
 } %DIF PREAMBLE
+\lstnewenvironment{DIFverbatim}{\lstset{style=DIFverbatimstyle}}{} %DIF PREAMBLE
+\lstnewenvironment{DIFverbatim*}{\lstset{style=DIFverbatimstyle,showspaces=true}}{} %DIF PREAMBLE
 %DIF END PREAMBLE EXTENSION ADDED BY LATEXDIFF
 
 \begin{document}
@@ -147,7 +149,7 @@
 
        \vspace{0.2in}
 
-       Reference Manual (0.5\DIFdelbegin \DIFdel{.0}\DIFdelend \DIFaddbegin \DIFadd{.1}\DIFaddend )
+       Reference Manual (0.5\DIFdelbegin \DIFdel{.1}\DIFdelend \DIFaddbegin \DIFadd{.2}\DIFaddend )
 
        \vspace{0.2in}
 
@@ -797,12 +799,11 @@ can be downloaded from \href{https://github.com/acidanthera/MaciASL/releases}{Ac
   \textbf{Description}: Match table signature to be equal to this value
   unless all zero.
 
-  \DIFaddbegin \emph{\DIFadd{Note}}\DIFadd{: Make sure not to specify table signature when the sequence
+  \emph{Note}: Make sure not to specify table signature when the sequence
   needs to be replaced in multiple places. Especially when performing
   different kinds of renames.
-}
 
-\DIFaddend \end{enumerate}
+\end{enumerate}
 
 \subsection{Patch Properties}\label{acpipropspatch}
 
@@ -890,7 +891,7 @@ can be downloaded from \href{https://github.com/acidanthera/MaciASL/releases}{Ac
 
 \item
   \texttt{TableSignature}\\
-  \textbf{Type}: \\texttt{plist\ data}, 4 bytes\\
+  \textbf{Type}: \texttt{plist\ data}, 4 bytes\\
   \textbf{Failsafe}: All zero\\
   \textbf{Description}: Match table signature to be equal to this value
   unless all zero.
@@ -1071,7 +1072,7 @@ sudo pmset powernap 0
 sudo pmset standby 0
 \end{lstlisting}
 
-\emph{Note}: \DIFdelbegin \DIFdel{these }\DIFdelend \DIFaddbegin \DIFadd{These }\DIFaddend settings may reset at hardware change and in certain other circumstances.
+\emph{Note}: These settings may reset at hardware change and in certain other circumstances.
 To view their current state use \texttt{pmset -g} command in Terminal.
 
 \subsection{Properties}\label{booterprops}
@@ -1079,14 +1080,60 @@ To view their current state use \texttt{pmset -g} command in Terminal.
 \begin{enumerate}
 
 \item
-  \texttt{Quirks}\\
+  \DIFaddbegin \texttt{\DIFadd{MmioWhitelist}}\\
+  \textbf{\DIFadd{Type}}\DIFadd{: }\texttt{\DIFadd{plist\ array}}\\
+  \textbf{\DIFadd{Description}}\DIFadd{: Designed to be filled with }\texttt{\DIFadd{plist\ dict}} \DIFadd{values,
+  describing addresses critical for particular firmware functioning when
+  }\texttt{\DIFadd{DevirtualiseMmio}} \DIFadd{quirk is in use. See }\hyperref[booterpropsmmio]{MmioWhitelist Properties}
+  \DIFadd{section below.
+}
+
+\item
+  \DIFaddend \texttt{Quirks}\\
   \textbf{Type}: \texttt{plist\ dict}\\
   \textbf{Description}: Apply individual booter quirks described
   in \hyperref[booterpropsquirks]{Quirks Properties} section below.
 
 \end{enumerate}
 
-\subsection{Quirks Properties}\label{booterpropsquirks}
+\DIFaddbegin \subsection{\DIFadd{MmioWhitelist Properties}}\label{booterpropsmmio}
+
+\begin{enumerate}
+
+\item
+  \texttt{\DIFadd{Address}}\\
+  \textbf{\DIFadd{Type}}\DIFadd{: }\texttt{\DIFadd{plist\ integer}}\\
+  \textbf{\DIFadd{Failsafe}}\DIFadd{: }\texttt{\DIFadd{0}}\\
+  \textbf{\DIFadd{Description}}\DIFadd{: Exceptional MMIO address, which memory descriptor should be left
+  virtualised (unchanged) by }\texttt{\DIFadd{DevirtualiseMmio}}\DIFadd{. This means that the firmware will
+  be able to directly communicate with this memory region during operating system functioning,
+  because the region this value is in will be assigned a virtual address.
+}
+
+  \DIFadd{The addresses written here must be part of the memory map, have }\texttt{\DIFadd{EfiMemoryMappedIO}}
+  \DIFadd{type and }\texttt{\DIFadd{EFI\_MEMORY\_RUNTIME}} \DIFadd{attribute (highest bit) set. To find the list of the
+  candidates the debug log can be used.
+}
+
+\item
+  \texttt{\DIFadd{Comment}}\\
+  \textbf{\DIFadd{Type}}\DIFadd{: }\texttt{\DIFadd{plist\ string}}\\
+  \textbf{\DIFadd{Failsafe}}\DIFadd{: Empty string}\\
+  \textbf{\DIFadd{Description}}\DIFadd{: Arbitrary ASCII string used to provide human readable
+  reference for the entry. It is implementation defined whether this value is
+  used.
+}
+
+\item
+  \texttt{\DIFadd{Enabled}}\\
+  \textbf{\DIFadd{Type}}\DIFadd{: }\texttt{\DIFadd{plist\ boolean}}\\
+  \textbf{\DIFadd{Failsafe}}\DIFadd{: }\texttt{\DIFadd{false}}\\
+  \textbf{\DIFadd{Description}}\DIFadd{: This address will be devirtualised unless set to }\texttt{\DIFadd{true}}\DIFadd{.
+}
+
+\end{enumerate}
+
+\DIFaddend \subsection{Quirks Properties}\label{booterpropsquirks}
 
 \begin{enumerate}
 
@@ -1111,10 +1158,18 @@ To view their current state use \texttt{pmset -g} command in Terminal.
   This option reduces stolen memory footprint from the memory map by removing
   runtime bit for known memory regions. This quirk may result in the increase
   of KASLR slides available, but is not necessarily compatible with the target
-  board.
+  board. \DIFaddbegin \DIFadd{In general this frees from 64 to 256 megabytes of memory (present in
+  the debug log), and on some platforms it is the only way to boot macOS, which
+  otherwise fails with allocation error at bootloader stage.
+}\DIFaddend 
 
-  \emph{Note}: This option is generally useful on APTIO V firmwares (Broadwell and newer).
-
+  \DIFdelbegin \emph{\DIFdel{Note}}%DIFAUXCMD
+\DIFdel{: }\DIFdelend This option is generally useful on \DIFdelbegin \DIFdel{APTIO V firmwares (Broadwell and
+  newer). }\DIFdelend \DIFaddbegin \DIFadd{all firmwares except some very old ones,
+  like Sandy Bridge. On select firmwares it may require a list of exceptional
+  addresses that still need to get their virtual addresses for proper NVRAM and
+  hibernation functioning. Use }\texttt{\DIFadd{MmioWhitelist}} \DIFadd{section to do this.
+}\DIFaddend 
 
 \item
   \texttt{DisableSingleUser}\\
@@ -1422,18 +1477,16 @@ blocking.
   (e.g. \texttt{Contents/MacOS/Lilu}).
 
 \item
-  \texttt{\DIFdelbegin \DIFdel{MatchKernel}\DIFdelend \DIFaddbegin \DIFadd{MaxKernel}\DIFaddend }\\
+  \texttt{MaxKernel}\\
   \textbf{Type}: \texttt{plist\ string}\\
   \textbf{Failsafe}: Empty string\\
-  \textbf{Description}: Adds kernel driver on \DIFdelbegin \DIFdel{selected macOS version only.
-The selection happens based on prefix match with the kernel version, i.
-e.
-  }\DIFdelend \DIFaddbegin \DIFadd{specified macOS version or older.
-}
+  \textbf{Description}: Adds kernel driver on specified macOS version or older.
 
-  \hypertarget{kernmatch}\DIFadd{Kernel version interpretation is implemented as follows:
-  }\begin{align*}
-    \DIFadd{\begin{aligned}
+  \hypertarget{kernmatch}Kernel version can be obtained with \texttt{uname -r} command,
+  and should look like 3 numbers separated by dots, for example \texttt{18.7.0} is the
+  kernel version for \texttt{10.14.6}. Kernel version interpretation is implemented as follows:
+  \begin{align*}
+    \begin{aligned}
       ParseDarwinVersion(\kappa,\lambda,\mu)=&(\lfloor\frac{\kappa}{10}\rfloor\cdot10
       + \kappa-\lfloor\frac{\kappa}{10}\rfloor\cdot10)\cdot10000 &&
         \text{Where }\kappa\in(0,99)\text{ is kernel version major} \\
@@ -1444,44 +1497,40 @@ e.
       + \mu-\lfloor\frac{\mu}{10}\rfloor\cdot10) &&
         \text{Where }\mu\in(0,99)\text{ is kernel version patch}
     \end{aligned}
-  }\end{align*}
-  \DIFadd{Kernel version comparison is implemented as follows:
-  }\begin{align*}
-    \DIFadd{\alpha}&\DIFadd{=\begin{cases}
+  \end{align*}
+  Kernel version comparison is implemented as follows:
+  \begin{align*}
+    \alpha&=\begin{cases}
       \vspace{-0.5cm}\mbox{\hspace{8cm}} & \mbox{\hspace{5cm}} \\
       ParseDarwinVersion(\texttt{MinKernel}), & \text{If } \texttt{MinKernel} \text{ is valid} \\
       0 & Otherwise
-    \end{cases} }\\
-    \DIFadd{\beta}&\DIFadd{=\begin{cases}
+    \end{cases} \\
+    \beta&=\begin{cases}
       \vspace{-0.5cm}\mbox{\hspace{8cm}} & \mbox{\hspace{5cm}} \\
       ParseDarwinVersion(\texttt{MaxKernel}), & \text{If } \texttt{MaxKernel} \text{ is valid} \\
       \infty & Otherwise
-    \end{cases} }\\
-    \DIFadd{\gamma}&\DIFadd{=\begin{cases}
+    \end{cases} \\
+    \gamma&=\begin{cases}
       \vspace{-0.5cm}\mbox{\hspace{8cm}} & \mbox{\hspace{5cm}} \\
       ParseDarwinVersion(FindDarwinVersion()), & \text{If valid } \texttt{"Darwin Kernel Version"} \text{ is found} \\
       \infty & Otherwise
-    \end{cases} }\\
-    & \DIFadd{\hspace{5cm} f(\alpha,\beta,\gamma)=\alpha\leq\gamma\leq\beta
-  }\end{align*}
-  \DIFadd{Here $ParseDarwinVersion$ argument is assumed to be 3 integers obtained by splitting Darwin kernel version
-  string from left to right by the }\texttt{\DIFadd{.}} \DIFadd{symbol. $FindDarwinVersion$ function looks up
-  Darwin kernel version by locating }\texttt{\DIFadd{"Darwin Kernel Version $\kappa$.$\lambda$.$\mu$"}} \DIFadd{string
+    \end{cases} \\
+    & \hspace{5cm} f(\alpha,\beta,\gamma)=\alpha\leq\gamma\leq\beta
+  \end{align*}
+  Here $ParseDarwinVersion$ argument is assumed to be 3 integers obtained by splitting Darwin kernel version
+  string from left to right by the \texttt{.} symbol. $FindDarwinVersion$ function looks up
+  Darwin kernel version by locating \texttt{"Darwin Kernel Version $\kappa$.$\lambda$.$\mu$"} string
   in the kernel image.
-}
 
 \item
-  \DIFaddend \texttt{\DIFdelbegin \DIFdel{16.7.0}\DIFdelend \DIFaddbegin \DIFadd{MinKernel}\DIFaddend }\DIFdelbegin \DIFdel{will match macOS 10.12.6 and }\texttt{\DIFdel{16.}} %DIFAUXCMD
-\DIFdel{will match
-  any macOS 10.12.x version }\DIFdelend \DIFaddbegin \\
-  \textbf{\DIFadd{Type}}\DIFadd{: }\texttt{\DIFadd{plist\ string}}\\
-  \textbf{\DIFadd{Failsafe}}\DIFadd{: Empty string}\\
-  \textbf{\DIFadd{Description}}\DIFadd{: Adds kernel driver on specified macOS version or newer}\DIFaddend .
+  \texttt{MinKernel}\\
+  \textbf{Type}: \texttt{plist\ string}\\
+  \textbf{Failsafe}: Empty string\\
+  \textbf{Description}: Adds kernel driver on specified macOS version or newer.
 
-  \DIFaddbegin \emph{\DIFadd{Note}}\DIFadd{: Refer to }\hyperlink{kernmatch}{\texttt{Add} \texttt{MaxKernel} description} \DIFadd{for matching logic.
-}
+  \emph{Note}: Refer to \hyperlink{kernmatch}{\texttt{Add} \texttt{MaxKernel} description} for matching logic.
 
-\DIFaddend \item
+\item
   \texttt{PlistPath}\\
   \textbf{Type}: \texttt{plist\ string}\\
   \textbf{Failsafe}: Empty string\\
@@ -1516,30 +1565,22 @@ e.
     (e.g. \texttt{com.apple.driver.AppleTyMCEDriver}).
 
 \item
-  \texttt{\DIFdelbegin \DIFdel{MatchKernel}\DIFdelend \DIFaddbegin \DIFadd{MaxKernel}\DIFaddend }\\
+  \texttt{MaxKernel}\\
   \textbf{Type}: \texttt{plist\ string}\\
   \textbf{Failsafe}: Empty string\\
-  \textbf{Description}: Blocks kernel driver on \DIFdelbegin \DIFdel{selected macOS version only.
-The selection happens based on prefix match with the kernel version, i.
-e.
-  }\DIFdelend \DIFaddbegin \DIFadd{specified macOS version or older.
-}
+  \textbf{Description}: Blocks kernel driver on specified macOS version or older.
 
-  \emph{\DIFadd{Note}}\DIFadd{: Refer to }\hyperlink{kernmatch}{\texttt{Add} \texttt{MaxKernel} description} \DIFadd{for matching logic.
-}
+  \emph{Note}: Refer to \hyperlink{kernmatch}{\texttt{Add} \texttt{MaxKernel} description} for matching logic.
 
 \item
-  \DIFaddend \texttt{\DIFdelbegin \DIFdel{16.7.0}\DIFdelend \DIFaddbegin \DIFadd{MinKernel}\DIFaddend }\DIFdelbegin \DIFdel{will match macOS 10.12.6 and }\texttt{\DIFdel{16.}} %DIFAUXCMD
-\DIFdel{will match
-  any macOS 10.12.x version }\DIFdelend \DIFaddbegin \\
-  \textbf{\DIFadd{Type}}\DIFadd{: }\texttt{\DIFadd{plist\ string}}\\
-  \textbf{\DIFadd{Failsafe}}\DIFadd{: Empty string}\\
-  \textbf{\DIFadd{Description}}\DIFadd{: Blocks kernel driver on specified macOS version or newer}\DIFaddend .
+  \texttt{MinKernel}\\
+  \textbf{Type}: \texttt{plist\ string}\\
+  \textbf{Failsafe}: Empty string\\
+  \textbf{Description}: Blocks kernel driver on specified macOS version or newer.
 
-  \DIFaddbegin \emph{\DIFadd{Note}}\DIFadd{: Refer to }\hyperlink{kernmatch}{\texttt{Add} \texttt{MaxKernel} description} \DIFadd{for matching logic.
-}
+  \emph{Note}: Refer to \hyperlink{kernmatch}{\texttt{Add} \texttt{MaxKernel} description} for matching logic.
 
-\DIFaddend \end{enumerate}
+\end{enumerate}
 
 \subsection{Emulate Properties}\label{kernelpropsemu}
 
@@ -1632,30 +1673,22 @@ e.
   otherwise.
 
 \item
-  \texttt{\DIFdelbegin \DIFdel{MatchKernel}\DIFdelend \DIFaddbegin \DIFadd{MaxKernel}\DIFaddend }\\
+  \texttt{MaxKernel}\\
   \textbf{Type}: \texttt{plist\ string}\\
   \textbf{Failsafe}: Empty string\\
-  \textbf{Description}: \DIFdelbegin \DIFdel{Adds kernel driver to selected macOS version only.
-The selection happens based on prefix match with the kernel version, i.
-e.
-  }\DIFdelend \DIFaddbegin \DIFadd{Patches data on specified macOS version or older.
-}
+  \textbf{Description}: Patches data on specified macOS version or older.
 
-  \emph{\DIFadd{Note}}\DIFadd{: Refer to }\hyperlink{kernmatch}{\texttt{Add} \texttt{MaxKernel} description} \DIFadd{for matching logic.
-}
+  \emph{Note}: Refer to \hyperlink{kernmatch}{\texttt{Add} \texttt{MaxKernel} description} for matching logic.
 
 \item
-  \DIFaddend \texttt{\DIFdelbegin \DIFdel{16.7.0}\DIFdelend \DIFaddbegin \DIFadd{MinKernel}\DIFaddend }\DIFdelbegin \DIFdel{will match macOS 10.12.6 and }\texttt{\DIFdel{16.}} %DIFAUXCMD
-\DIFdel{will match
-  any macOS 10.12.x version }\DIFdelend \DIFaddbegin \\
-  \textbf{\DIFadd{Type}}\DIFadd{: }\texttt{\DIFadd{plist\ string}}\\
-  \textbf{\DIFadd{Failsafe}}\DIFadd{: Empty string}\\
-  \textbf{\DIFadd{Description}}\DIFadd{: Patches data on specified macOS version or newer}\DIFaddend .
+  \texttt{MinKernel}\\
+  \textbf{Type}: \texttt{plist\ string}\\
+  \textbf{Failsafe}: Empty string\\
+  \textbf{Description}: Patches data on specified macOS version or newer.
 
-  \DIFaddbegin \emph{\DIFadd{Note}}\DIFadd{: Refer to }\hyperlink{kernmatch}{\texttt{Add} \texttt{MaxKernel} description} \DIFadd{for matching logic.
-}
+  \emph{Note}: Refer to \hyperlink{kernmatch}{\texttt{Add} \texttt{MaxKernel} description} for matching logic.
 
-\DIFaddend \item
+\item
   \texttt{Replace}\\
   \textbf{Type}: \texttt{plist\ data}\\
   \textbf{Failsafe}: Empty data\\
@@ -1765,7 +1798,21 @@ e.
   log preventing from observing panic details. Affects 10.13 and above.
 
 \item
-  \texttt{ThirdPartyTrim}\\
+  \DIFaddbegin \texttt{\DIFadd{PowerTimeoutKernelPanic}}\\
+  \textbf{\DIFadd{Type}}\DIFadd{: }\texttt{\DIFadd{plist\ boolean}}\\
+  \textbf{\DIFadd{Failsafe}}\DIFadd{: }\texttt{\DIFadd{false}}\\
+  \textbf{\DIFadd{Description}}\DIFadd{: Disables kernel panic on setPowerState timeout.
+}
+
+  \DIFadd{An additional security measure was added to macOS Catalina (10.15) causing
+  kernel panic on power change timeout for Apple drivers. Sometimes it may cause
+  issues on misconfigured hardware, notably digital audio, which sometimes fails
+  to wake up. For debug kernels }\texttt{\DIFadd{setpowerstate\_panic=0}} \DIFadd{boot argument
+  should be used, which is otherwise equivalent to this quirk.
+}
+
+\item
+  \DIFaddend \texttt{ThirdPartyTrim}\\
   \textbf{Type}: \texttt{plist\ boolean}\\
   \textbf{Failsafe}: \texttt{false}\\
   \textbf{Description}: Patch IOAHCIBlockStorage.kext to force TRIM command support
@@ -1815,7 +1862,7 @@ behaviour that does not go to any other sections
 
   Designed to be filled with \texttt{plist\ string} entries containing
   absolute UEFI paths to customised bootloaders, for example,
-  \texttt{\textbackslash EFI\textbackslash Microsoft\textbackslash bootmgfw.efi}
+  \texttt{\textbackslash EFI\textbackslash Microsoft\textbackslash \DIFaddbegin \DIFadd{Boot\textbackslash }\DIFaddend bootmgfw.efi}
   for Microsoft bootloader. This allows unusual boot paths to be automaticlly
   discovered by the boot picker. Designwise they are equivalent to predefined blessed path, such as
   \texttt{\textbackslash System\textbackslash Library\textbackslash CoreServices\textbackslash boot.efi},
@@ -1850,9 +1897,7 @@ behaviour that does not go to any other sections
   See \hyperref[miscentryprops]{Entry Properties} section below.
 
   \emph{Note}: Select tools, for example,
-  \href{https://github.com/acidanthera/OpenCoreShell}{UEFI Shell} \DIFdelbegin \DIFdel{or
-  }%DIFDELCMD < \href{https://github.com/acidanthera/AppleSupportPkg#cleannvram}{CleanNvram} %%%
-\DIFdelend are very
+  \href{https://github.com/acidanthera/OpenCoreShell}{UEFI Shell} are very
   dangerous and \textbf{MUST NOT} appear in production configurations, especially
   in vaulted ones and protected with secure boot, as they may be used to easily
   bypass secure boot chain.
@@ -1872,10 +1917,9 @@ behaviour that does not go to any other sections
   Set to empty string not to change console mode. Set to \texttt{Max}
   to try to use largest available console mode.
 
-  \DIFaddbegin \emph{\DIFadd{Note}}\DIFadd{: This field is best to be left empty on most firmwares.
-}
+  \emph{Note}: This field is best to be left empty on most firmwares.
 
-\DIFaddend \item
+\item
   \texttt{ConsoleBehaviourOs}\\
   \textbf{Type}: \texttt{plist\ string}\\
   \textbf{Failsafe}: Empty string\\
@@ -1886,7 +1930,7 @@ behaviour that does not go to any other sections
   require its presence, which is what \texttt{ConsoleControl} UEFI protocol is for.
 
   When console control is available, OpenCore can be made console control aware,
-  and \DIFdelbegin \DIFdel{and }\DIFdelend set different modes for the operating system booter (\texttt{ConsoleBehaviourOs}),
+  and set different modes for the operating system booter (\texttt{ConsoleBehaviourOs}),
   which normally runs in graphics mode, and its own user interface
   (\texttt{ConsoleBehaviourUi}), which normally runs in text mode. Possible
   behaviours, set as values of these options, include:
@@ -2013,7 +2057,8 @@ behaviour that does not go to any other sections
   \textbf{Type}: \texttt{plist\ integer}, 32 bit\\
   \textbf{Failsafe}: \texttt{0}\\
   \textbf{Description}: Timeout in seconds in boot picker before
-  automatic booting of the default boot entry.
+  automatic booting of the default boot entry. \DIFaddbegin \DIFadd{Use 0 to disable timer.
+}\DIFaddend 
 
 \item
   \texttt{UsePicker}\\
@@ -2054,7 +2099,7 @@ behaviour that does not go to any other sections
   recovery. Hold \texttt{CMD+R} key combination to choose this option.
   \end{itemize}
 
-  \emph{Note}: \texttt{AppleGenericInput}, \texttt{UsbKbDxe}, or similar driver is required
+  \emph{Note}: activated \texttt{KeySupport}, \texttt{UsbKbDxe}, or similar driver is required
   for key handling to work. On many firmwares it is not possible to get all the keys function.
 
   In addition to \texttt{OPT} OpenCore supports \texttt{Escape} key
@@ -2176,14 +2221,15 @@ nvram 4D1FDA02-38C7-4A6A-9CC6-4BCCA8B30102:boot-log |
 \item
   \texttt{ExposeSensitiveData}\\
   \textbf{Type}: \texttt{plist\ integer}\\
-  \textbf{Failsafe}: \texttt{2}\\
+  \textbf{Failsafe}: \texttt{\DIFdelbegin \DIFdel{2}\DIFdelend \DIFaddbegin \DIFadd{0x6}\DIFaddend }\\
   \textbf{Description}: Sensitive data exposure bitmask (sum) to operating system.
 
   \begin{itemize}
   \tightlist
     \item \texttt{0x01} --- Expose printable booter path as an UEFI variable.
     \item \texttt{0x02} --- Expose OpenCore version as an UEFI variable.
-  \end{itemize}
+    \DIFaddbegin \item \texttt{\DIFadd{0x04}} \DIFadd{--- Expose OpenCore version in boot picker menu title.
+  }\DIFaddend \end{itemize}
 
   Exposed booter path points to OpenCore.efi or its booter depending on the load order.
   To obtain booter path use the following command in macOS:
@@ -2349,7 +2395,7 @@ rm vault.pub
   \emph{Note}: Given the above description, \texttt{0xF0103} value is expected to allow
   scanning of SATA, SAS, SCSI, and NVMe devices with APFS file system, and prevent scanning
   of any devices with HFS or FAT32 file systems in addition to not scanning APFS file systems
-  on USB, CD, USB, and FireWire drives. The combination reads as:
+  on USB, CD, and FireWire drives. The combination reads as:
   \begin{itemize}
   \tightlist
   \item \texttt{OC\_SCAN\_FILE\_SYSTEM\_LOCK}
@@ -2367,15 +2413,14 @@ rm vault.pub
 
 \begin{enumerate}
 \item
-  \DIFaddbegin \texttt{\DIFadd{Arguments}}\\
-  \textbf{\DIFadd{Type}}\DIFadd{: }\texttt{\DIFadd{plist\ string}}\\
-  \textbf{\DIFadd{Failsafe}}\DIFadd{: Empty string}\\
-  \textbf{\DIFadd{Description}}\DIFadd{: Arbitrary ASCII string used as boot arguments (load options)
+  \texttt{Arguments}\\
+  \textbf{Type}: \texttt{plist\ string}\\
+  \textbf{Failsafe}: Empty string\\
+  \textbf{Description}: Arbitrary ASCII string used as boot arguments (load options)
   of the specified entry.
-}
 
 \item
-  \DIFaddend \texttt{Comment}\\
+  \texttt{Comment}\\
   \textbf{Type}: \texttt{plist\ string}\\
   \textbf{Failsafe}: Empty string\\
   \textbf{Description}: Arbitrary ASCII string used to provide human readable
@@ -2408,7 +2453,7 @@ rm vault.pub
   Example: \texttt{PciRoot(0x0)/Pci(0x1,0x1)/.../\textbackslash EFI\textbackslash COOL.EFI}
   \item \texttt{Tools} specify internal boot options, which are part of bootloader
   vault, and therefore take file paths relative to \texttt{OC/Tools} directory.
-  Example: \texttt{\DIFdelbegin \DIFdel{CleanNvram}\DIFdelend \DIFaddbegin \DIFadd{Shell}\DIFaddend .efi}.
+  Example: \texttt{Shell.efi}.
   \end{itemize}
 
 \end{enumerate}
@@ -3403,11 +3448,6 @@ and supplementary utilities can be used.
   \item \href{https://github.com/acidanthera/AppleSupportPkg}{\texttt{ApfsDriverLoader}}
   --- APFS file system bootstrap driver adding the support of embedded APFS drivers
   in bootable APFS containers in UEFI firmwares.
-  \item \href{https://github.com/acidanthera/AppleSupportPkg}{\texttt{AppleGenericInput}}
-  --- user input driver adding the support of \texttt{AppleKeyMapAggregator} protocols
-  on top of different UEFI input protocols. Additionally resolves mouse input issues
-  on select firmwares. This is an alternative to \texttt{UsbKbDxe}, which may work
-  better or worse depending on the firmware.
   \item \href{https://github.com/acidanthera/AppleSupportPkg}{\texttt{FwRuntimeServices}}
   --- \texttt{OC\_FIRMWARE\_RUNTIME} protocol implementation that increases the security
   of OpenCore and Lilu by supporting read-only and write-only NVRAM variables. Some
@@ -3427,7 +3467,7 @@ and supplementary utilities can be used.
   \item \href{https://github.com/acidanthera/AppleSupportPkg}{\texttt{UsbKbDxe}}
   --- USB keyboard driver adding the support of \texttt{AppleKeyMapAggregator} protocols
   on top of a custom USB keyboard driver implementation. This is an alternative to
-  \texttt{AppleGenericInput}, which may work better or worse depending on the firmware.
+  builtin \texttt{KeySypport}, which may work better or worse depending on the firmware.
   \item \href{https://github.com/acidanthera/VirtualSMC}{\texttt{VirtualSmc}}
   --- UEFI SMC driver, required for proper FileVault 2 functionality and potentially
   other macOS specifics. An alternative, named \texttt{SMCHelper}, is not compatible
@@ -3457,6 +3497,14 @@ build -a X64 -b RELEASE -t XCODE5 -p MdeModulePkg/MdeModulePkg.dsc
 \end{lstlisting}
 
 \item
+  \texttt{Input}\\
+  \textbf{Type}: \texttt{plist\ dict}\\
+  \textbf{Failsafe}: None\\
+  \textbf{Description}: Apply individual settings designed for input (keyboard and mouse) in
+  \hyperref[uefiinputprops]{Input Properties} section below.
+
+
+\item
   \texttt{Protocols}\\
   \textbf{Type}: \texttt{plist\ dict}\\
   \textbf{Failsafe}: None\\
@@ -3471,6 +3519,120 @@ build -a X64 -b RELEASE -t XCODE5 -p MdeModulePkg/MdeModulePkg.dsc
   \textbf{Failsafe}: None\\
   \textbf{Description}: Apply individual firmware quirks described in
   \hyperref[uefiquirkprops]{Quirks Properties} section below.
+
+\end{enumerate}
+
+\subsection{Input Properties}\label{uefiinputprops}
+
+\begin{enumerate}
+
+\item
+  \texttt{KeyForgetThreshold}\\
+  \textbf{Type}: \texttt{plist\ integer}\\
+  \textbf{Failsafe}: \texttt{0}\\
+  \textbf{Description}: Remove key unless it was submitted during this timeout in milliseconds.
+
+  \texttt{AppleKeyMapAggregator} protocol is supposed to contain a fixed length buffer
+  of currently pressed keys. However, the majority of the drivers only report key
+  presses as interrupts and pressing and holding the key on the keyboard results in
+  subsequent submissions of this key with some defined time interval. As a result
+  we use a timeout to remove once pressed keys from the buffer once the timeout
+  expires and no new submission of this key happened.
+
+  This option allows to set this timeout based on your platform. The recommended
+  value that works on the majority of the platforms is \texttt{5} milliseconds.
+  For reference, holding one key on VMware will repeat it roughly every \texttt{2}
+  milliseconds and the same value for APTIO V is \texttt{3-4} milliseconds. Thus
+  it is possible to set a slightly lower value on faster platforms
+  and slightly higher value on slower platforms for more responsive input.
+
+\item
+  \texttt{KeyMergeThreshold}\\
+  \textbf{Type}: \texttt{plist\ integer}\\
+  \textbf{Failsafe}: \texttt{0}\\
+  \textbf{Description}: Assume simultaneous combination for keys submitted within
+  this timeout in milliseconds.
+
+  Similarly to \texttt{KeyForgetThreshold}, this option works around the sequential
+  nature of key submission. To be able to recognise simultaneously pressed keys
+  in the situation when all keys arrive sequentially, we are required to set
+  a timeout within which we assume the keys were pressed together.
+
+  Holding multiple keys results in reports every \texttt{2} and \texttt{1} milliseconds
+  for VMware and APTIO V respectively. Pressing keys one after the other results in
+  delays of at least \texttt{6} and \texttt{10} milliseconds for the same platforms.
+  The recommended value for this option is \texttt{2} milliseconds, but it may be
+  decreased for faster platforms and increased for slower.
+
+\item
+  \texttt{KeySupport}\\
+  \textbf{Type}: \texttt{plist\ boolean}\\
+  \textbf{Failsafe}: \texttt{false}\\
+  \textbf{Description}: Enable internal keyboard input translation to
+  \texttt{AppleKeyMapAggregator} protocol.
+
+  This option activates the internal keyboard interceptor driver, based on
+  \texttt{AppleGenericInput} aka \texttt{AptioIntputFix}), to fill
+  \texttt{AppleKeyMapAggregator} database for input functioning. In case
+  a separate driver is used, such as \texttt{UsbKbDxe}, this option
+  should never be enabled.
+
+\item
+  \texttt{KeySupportMode}\\
+  \textbf{Type}: \texttt{plist\ string}\\
+  \textbf{Failsafe}: empty string\\
+  \textbf{Description}: Set internal keyboard input translation to
+  \texttt{AppleKeyMapAggregator} protocol mode.
+
+  \begin{itemize}
+  \tightlist
+  \item \texttt{Auto} --- Performs automatic choice as available with the following preference: \texttt{AMI}, \texttt{V2}, \texttt{V1}.
+  \item \texttt{V1} --- Uses UEFI standard legacy input protocol \texttt{EFI\_SIMPLE\_TEXT\_INPUT\_PROTOCOL}.
+  \item \texttt{V2} --- Uses UEFI standard modern input protocol \texttt{EFI\_SIMPLE\_TEXT\_INPUT\_EX\_PROTOCOL}.
+  \item \texttt{AMI} --- Uses APTIO input protocol \texttt{AMI\_EFIKEYCODE\_PROTOCOL}.
+  \end{itemize}
+
+\item
+  \texttt{KeySwap}\\
+  \textbf{Type}: \texttt{plist\ boolean}\\
+  \textbf{Failsafe}: \texttt{false}\\
+  \textbf{Description}: Swap \texttt{Command} and \texttt{Option} keys during submission.
+
+  This option may be useful for keyboard layouts with \texttt{Option} key situated to the right
+  of \texttt{Command} key.
+
+\item
+  \texttt{PointerSupport}\\
+  \textbf{Type}: \texttt{plist\ boolean}\\
+  \textbf{Failsafe}: \texttt{false}\\
+  \textbf{Description}: Enable internal pointer driver.
+
+  This option implements standard UEFI pointer protocol (\texttt{EFI\_SIMPLE\_POINTER\_PROTOCOL})
+  through select OEM protocols. The option may be useful on Z87 ASUS boards, where
+  \texttt{EFI\_SIMPLE\_POINTER\_PROTOCOL} is broken.
+
+\item
+  \texttt{PointerSupportMode}\\
+  \textbf{Type}: \texttt{plist\ string}\\
+  \textbf{Failsafe}: empty string\\
+  \textbf{Description}: Set OEM protocol used for internal pointer driver.
+
+  Currently the only supported variant is \texttt{ASUS}, using specialised protocol available
+  on select Z87 and Z97 ASUS boards. More details can be found in
+  \href{https://github.com/LongSoft/UEFITool/pull/116}{\texttt{LongSoft/UefiTool\#116}}.
+
+\item
+  \texttt{TimerResolution}\\
+  \textbf{Type}: \texttt{plist\ integer}\\
+  \textbf{Failsafe}: \texttt{0}\\
+  \textbf{Description}: Set architecture timer resolution.
+
+  This option allows to update firmware architecture timer period with the specified value
+  in \texttt{100} nanosecond units. Setting a lower value generally improves performance
+  and responsiveness of the interface and input handling.
+
+  The recommended value is \texttt{50000} (\texttt{5} milliseconds) or slightly higher. ASUS
+  boards use \texttt{60000} for the interface. Apple boards use \texttt{100000}.
 
 \end{enumerate}
 
@@ -3645,7 +3807,24 @@ build -a X64 -b RELEASE -t XCODE5 -p MdeModulePkg/MdeModulePkg.dsc
   to be present on console handle. This option will install it if missing.
 
 \item
-  \texttt{ReleaseUsbOwnership}\\
+  \DIFaddbegin \texttt{\DIFadd{ReconnectOnResChange}}\\
+  \textbf{\DIFadd{Type}}\DIFadd{: }\texttt{\DIFadd{plist\ boolean}}\\
+  \textbf{\DIFadd{Failsafe}}\DIFadd{: }\texttt{\DIFadd{false}}\\
+  \textbf{\DIFadd{Description}}\DIFadd{: Reconnect console controllers after changing screen resolution.
+}
+
+  \DIFadd{On some firmwares when screen resolution is changed via GOP, it is required to reconnect
+  the controllers, which produce the console protocols (simple text out). Otherwise they
+  will not produce text based on the new resolution.
+}
+
+  \emph{\DIFadd{Note}}\DIFadd{: On several boards this logic may result in black screen when launching
+  OpenCore from Shell and thus it is optional. In versions prior to 0.5.2 this option
+  was mandatory and not configurable. Please do not use this unless required.
+}
+
+\item
+  \DIFaddend \texttt{ReleaseUsbOwnership}\\
   \textbf{Type}: \texttt{plist\ boolean}\\
   \textbf{Failsafe}: \texttt{false}\\
   \textbf{Description}: Attempt to detach USB controller ownership from
@@ -3709,7 +3888,7 @@ build -a X64 -b RELEASE -t XCODE5 -p MdeModulePkg/MdeModulePkg.dsc
   \item MBR (Master Boot Record) installations are legacy and will not be supported.
   \item To install Windows, macOS, and OpenCore on the same drive you can specify
   Windows bootloader path
-  (\texttt{\textbackslash EFI\textbackslash Microsoft\textbackslash bootmgfw.efi})
+  (\texttt{\textbackslash EFI\textbackslash Microsoft\textbackslash \DIFaddbegin \DIFadd{Boot\textbackslash }\DIFaddend bootmgfw.efi})
   in \texttt{BlessOverride} section.
   \item All the modifications applied (to ACPI, NVRAM, SMBIOS, etc.) are supposed
   to be operating system agnostic, i.e. apply equally regardless of the OS booted.
@@ -3719,7 +3898,7 @@ build -a X64 -b RELEASE -t XCODE5 -p MdeModulePkg/MdeModulePkg.dsc
   \href{https://github.com/acidanthera/bugtracker/issues/327}{workaround}
   for this, it is highly recommend not to rely on it and install properly.
   \item Windows may need to be reactivated. To avoid it consider
-  leaving SystemUUID field empty, so that the original firmware UUID is used. Be warned,
+  \DIFdelbegin \DIFdel{leaving SystemUUID field empty, so that }\DIFdelend \DIFaddbegin \DIFadd{setting SystemUUID to }\DIFaddend the original firmware UUID\DIFdelbegin \DIFdel{is used}\DIFdelend . Be warned,
   on old firmwares it may be invalid, i.e. not random. In case you still have issues,
   consider using HWID or KMS38 license. The nuances of Windows activation are out of the
   scope of this document and can be found online.
@@ -3836,15 +4015,14 @@ To obtain the log during boot you can make the use of serial port debugging. Ser
 debugging is enabled in \texttt{Target}, e.g. \texttt{0xB} for onscreen with serial. OpenCore
 uses \texttt{115200} baud rate, \texttt{8} data bits, no parity, and \texttt{1} stop bit.
 For macOS your best choice are CP2102-based UART devices. Connect motherboard \texttt{TX}
-to USB UART \texttt{\DIFdelbegin \DIFdel{GND}\DIFdelend \DIFaddbegin \DIFadd{RX}\DIFaddend }, and motherboard \texttt{GND} to USB UART \texttt{\DIFdelbegin \DIFdel{RX}\DIFdelend \DIFaddbegin \DIFadd{GND}\DIFaddend }. Use
+to USB UART \texttt{RX}, and motherboard \texttt{GND} to USB UART \texttt{GND}. Use
 \texttt{screen} utility to get the output, or download GUI software, such as
-\href{https://freeware.the-meiers.org}{CoolTerm}\DIFaddbegin \DIFadd{.
-}
+\href{https://freeware.the-meiers.org}{CoolTerm}.
 
-\emph{\DIFadd{Note}}\DIFadd{: On several motherboards (and possibly USB UART dongles) PIN naming may be
-incorrect. It is very common to have }\texttt{\DIFadd{GND}} \DIFadd{swapped with }\texttt{\DIFadd{RX}}\DIFadd{, thus you have
-to connect motherboard ``}\texttt{\DIFadd{TX}}\DIFadd{'' to USB UART }\texttt{\DIFadd{GND}}\DIFadd{, and motherboard ``}\texttt{\DIFadd{GND}}\DIFadd{''
-to USB UART }\texttt{\DIFadd{RX}}\DIFaddend .
+\emph{Note}: On several motherboards (and possibly USB UART dongles) PIN naming may be
+incorrect. It is very common to have \texttt{GND} swapped with \texttt{RX}, thus you have
+to connect motherboard ``\texttt{TX}'' to USB UART \texttt{GND}, and motherboard ``\texttt{GND}''
+to USB UART \texttt{RX}.
 
 Remember to enable \texttt{COM} port in firmware settings, and never use USB cables longer
 than 1 meter to avoid output corruption. To additionally enable XNU kernel serial output
@@ -3880,7 +4058,9 @@ you will need \texttt{debug=0x8} boot argument.
   \end{itemize}
 
   If there is no obvious error, check the available hacks in \texttt{Quirks} sections
-  one by one.
+  one by one. For early boot troubleshooting, for instance, when OpenCore menu does not appear,
+  using \href{https://github.com/acidanthera/OpenCoreShell}{UEFI Shell} may help to see
+  early debug messages.
 
 \item
   \textbf{How to customise boot entries?}

@@ -1,11 +1,21 @@
 OpenCore Changelog
 ==================
+#### v0.5.2
+- Fixed `MinKernel` and `MaxKernel` logic (thx @dhinakg, @reitermarkus)
+- Fixed ASSERT when booting non-Apple OSes without arguments from the DEBUG version
+- Added `MmioWhitelist` configuration option
+- Added `PowerTimeoutKernelPanic` kernel quirk
+- Fixed erratic cursor appearing in release builds
+- Moved `ReconnectOnResChange` to a user-configurable quirk to avoid freezes
+- Added OpenCore version to picker ui, configured by `ExposeSensitiveData`
 
 #### v0.5.1
 - Added support of kernel resource kext injection
 - Added support for 0.25% clock slowdown on Xeon Scalable CPUs (thx @mrmiller)
 - Replaced `MatchKernel` with `MinKernel` and `MaxKernel`
 - Added `Arguments` to `Tools` and `Entries` sections
+- Fixed broken timer for 300 series Intel chipsets
+- Added `Input` section for mouse and keyboard aggregation
 
 #### v0.5.0
 - Added builtin firmware versions for new models 2019
