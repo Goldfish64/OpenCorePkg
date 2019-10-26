@@ -328,10 +328,12 @@ OcKernelInitExtensionsPatcher (
     return EFI_SUCCESS;
   }
 
-  Status = AllocateCopyFileData (File, &FileBuffer, &FileSize);
+  FileSize = 0;
+  Status = AllocateCopyFileData (File, 0, &FileSize, &FileBuffer);
   if (EFI_ERROR (Status)) {
     return Status;
   }
+  File->SetPosition (File, 0);
 
   Status = PatcherInitContextFromBuffer (&FilePatcher, FileBuffer, FileSize);
   if (EFI_ERROR (Status)) {
@@ -392,10 +394,11 @@ OcKernelProcessExtensionsDir (
     //
     // Read plist data.
     //
-    Status = AllocateCopyFileData (*File, &Buffer, &BufferSize);
+    Status = AllocateCopyFileData (*File, 0, &BufferSize, &Buffer);
     if (EFI_ERROR (Status)) {
       return Status;
     }
+    (*File)->SetPosition (*File, 0);
 
     //
     // Initialize plist XML.

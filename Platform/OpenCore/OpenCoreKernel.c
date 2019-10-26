@@ -160,6 +160,7 @@ OcKernelReadDarwinVersion (
   return DarwinVersionInteger;
 }
 
+
 STATIC
 UINT32
 OcKernelLoadKextsAndReserve (
@@ -325,7 +326,7 @@ OcKernelApplyPatch (
   return PatcherApplyGenericPatch (Patcher, &Patch);
 }
 
-STATIC
+//STATIC
 VOID
 OcKernelApplyPatches (
   IN     OC_GLOBAL_CONFIG  *Config,
@@ -535,7 +536,7 @@ OcKernelBlockKexts (
   }
 }
 
-STATIC
+//STATIC
 EFI_STATUS
 OcKernelProcessPrelinked (
   IN     OC_GLOBAL_CONFIG  *Config,
@@ -635,62 +636,72 @@ OcKernelProcessPrelinked (
 }
 
 STATIC
-VOID
-OcReadMkext (
-  IN  OC_GLOBAL_CONFIG  *Config,
-  IN  CHAR16                  *FileName,
-  IN OUT EFI_FILE_PROTOCOL  **File
-) {
-  // Read wntire file.
-    EFI_TIME           ModificationTime;
+EFI_STATUS
+OcKernelProcessMkext (
+  IN     OC_GLOBAL_CONFIG  *Config,
+  IN OUT UINT8             *Mkext,
+  IN OUT UINT32            *MkextSize,
+  IN     UINT32            AllocatedSizeA,
+  IN     UINT32            AllocatedSizeB,
+  IN     BOOLEAN           IsFat
+  )
+{
+  EFI_STATUS            Status;
+  MKEXT_CONTEXT         Context;
+  UINT32                Index;
+  OC_KERNEL_ADD_ENTRY   *Kext;
 
-  UINT32 BufferSize;
-  UINT8 *Buffer;
-  UINT32 AllocSize;  
-  UINT32               Index;
-  OC_KERNEL_ADD_ENTRY  *Kext;
+  UINT32                MkextOffset32;
+  UINT32                MkextSize32;
+  UINT32                MkextOffset64;
+  UINT32                MkextSize64;
 
-  ReadAppleMkext (*File, &Buffer, &BufferSize, &AllocSize, OcKernelLoadKextsAndReserve (mOcStorage, mOcConfiguration));
+  //
+  // Process fat mkext.
+  //
+  if (IsFat) {
+    ParseFatArchitectures (
+      Mkext,
+      *MkextSize,
+      &MkextOffset32,
+      &MkextSize32,
+      &MkextOffset64,
+      &MkextSize64
+    );
 
-  //AllocateCopyFileData (*File, &Buffer, &BufferSize);
+    DEBUG ((DEBUG_INFO, "AllocSize 32: %u 64: %u\n", AllocatedSizeA, AllocatedSizeB));
 
-  MKEXT_CONTEXT Context;
-  RETURN_STATUS Status2 = MkextContextInit (&Context, Buffer, BufferSize, AllocSize);
-  ASSERT (Status2 == RETURN_SUCCESS);
+    Status = OcKernelProcessMkext (Config, &Mkext[MkextOffset32], &MkextSize32, AllocatedSizeA, 0, FALSE);
+    Status = OcKernelProcessMkext (Config, &Mkext[MkextOffset64], &MkextSize64, AllocatedSizeB, 0, FALSE);
+    DEBUG ((DEBUG_INFO, "New 32 size %u 64 size %u\n", MkextSize32, MkextSize64));
 
-
-  for (Index = 0; Index < Config->Kernel.Add.Count; Index++) {
-    Kext = Config->Kernel.Add.Values[Index];
-    if (!Kext->Enabled || Kext->PlistDataSize == 0) {
-      continue;
+    if (!UpdateFatHeader (Mkext, *MkextSize, MkextSize32, MkextSize64)) {
+      return EFI_INVALID_PARAMETER;
     }
 
+  //
+  // Process single mkext.
+  //
+  } else {
+    Status = MkextContextInit (&Context, Mkext, *MkextSize, AllocatedSizeA);
+    ASSERT (Status == RETURN_SUCCESS);
 
-    Status2 = MkextInjectKext (&Context, "/tmp/b.kext", Kext->PlistData, Kext->PlistDataSize, Kext->ImageData, Kext->ImageDataSize);
-    ASSERT (Status2 == RETURN_SUCCESS);
-  }
-
-  Status2 = MkextInjectComplete (&Context);
-  ASSERT (Status2 == RETURN_SUCCESS);
-
-        EFI_STATUS Status = GetFileModifcationTime (*File, &ModificationTime);
-      if (EFI_ERROR (Status)) {
-        ZeroMem (&ModificationTime, sizeof (ModificationTime));
+    for (Index = 0; Index < Config->Kernel.Add.Count; Index++) {
+      Kext = Config->Kernel.Add.Values[Index];
+      if (!Kext->Enabled || Kext->PlistDataSize == 0) {
+        continue;
       }
 
-(*File)->Close(*File);
+      Status = MkextInjectKext (&Context, "/tmp/b.kext", Kext->PlistData, Kext->PlistDataSize, Kext->ImageData, Kext->ImageDataSize);
+      ASSERT (Status == RETURN_SUCCESS);
+    }
 
-    //
-  // Create virtual file.
-  //
-  Status = CreateVirtualFileFileNameCopy (FileName, Buffer, Context.MkextSize, &ModificationTime, File);
-  if (EFI_ERROR (Status)) {
-   // DEBUG ((DEBUG_WARN, "Failed to virtualise file (%a)\n", FileName));
-    FreePool (Buffer);
-   // return EFI_OUT_OF_RESOURCES;
+    Status = MkextInjectComplete (&Context);
+    ASSERT (Status == RETURN_SUCCESS);
+    *MkextSize = Context.MkextSize;
   }
 
-  DEBUG ((DEBUG_INFO, "Done with mkext\n"));
+  return EFI_SUCCESS;
 }
 
 STATIC
@@ -708,10 +719,12 @@ OcKernelFileOpen (
   UINT8              *Kernel;
   UINT32             KernelSize;
   UINT32             AllocatedSize;
+  UINT32             AllocatedSizeB;
   EFI_FILE_PROTOCOL  *VirtualFileHandle;
-  EFI_STATUS         PrelinkedStatus;
+  //EFI_STATUS         PrelinkedStatus;
   EFI_TIME           ModificationTime;
   UINT32             DarwinVersion;
+  BOOLEAN            IsFat;
 
   //
   // Hook injected OcXXXXXXXX.kext reads from /S/L/E.
@@ -751,16 +764,18 @@ OcKernelFileOpen (
   // On 10.9 mach_kernel is loaded for manual linking aferwards, so we cannot skip it.
   //
   if (OpenMode == EFI_FILE_MODE_READ
-    && StrStr (FileName, L"kernel") != NULL
+    && StrStr (FileName, L"mach_kernel") != NULL
     && StrCmp (FileName, L"System\\Library\\Kernels\\kernel") != 0) {
 
     DEBUG ((DEBUG_INFO, "Trying XNU hook on %s\n", FileName));
     Status = ReadAppleKernel (
       *NewHandle,
+      OcKernelLoadKextsAndReserve (mOcStorage, mOcConfiguration),
       &Kernel,
       &KernelSize,
       &AllocatedSize,
-      OcKernelLoadKextsAndReserve (mOcStorage, mOcConfiguration)
+      &AllocatedSizeB,
+      &IsFat
       );
     DEBUG ((DEBUG_INFO, "Result of XNU hook on %s is %r\n", FileName, Status));
 
@@ -769,17 +784,17 @@ OcKernelFileOpen (
     //
     if (!EFI_ERROR (Status)) {
       DarwinVersion = OcKernelReadDarwinVersion (Kernel, KernelSize);
-      OcKernelApplyPatches (mOcConfiguration, DarwinVersion, NULL, Kernel, KernelSize);
+      //OcKernelApplyPatches (mOcConfiguration, DarwinVersion, NULL, Kernel, KernelSize);
 
-      PrelinkedStatus = OcKernelProcessPrelinked (
+     /* PrelinkedStatus = OcKernelProcessPrelinked (
         mOcConfiguration,
         DarwinVersion,
         Kernel,
         &KernelSize,
         AllocatedSize
-        );
+        );*/
 
-      DEBUG ((DEBUG_INFO, "Prelinked status - %r\n", PrelinkedStatus));
+    //  DEBUG ((DEBUG_INFO, "Prelinked status - %r\n", PrelinkedStatus));
 
       Status = GetFileModifcationTime (*NewHandle, &ModificationTime);
       if (EFI_ERROR (Status)) {
@@ -836,9 +851,55 @@ OcKernelFileOpen (
 
   if (OpenMode == EFI_FILE_MODE_READ
     && StrStr (FileName, L"Extensions.mkext") != NULL) {
-    DEBUG ((DEBUG_INFO, "OC: Hooking mkext: %s\n", FileName));
-    OcReadMkext (mOcConfiguration, FileName, NewHandle);
-    return EFI_SUCCESS;
+
+    DEBUG ((DEBUG_INFO, "Trying mkext hook on %s\n", FileName));
+    Status = ReadAppleMkext (
+      *NewHandle,
+      OcKernelLoadKextsAndReserve (mOcStorage, mOcConfiguration),
+      &Kernel,
+      &KernelSize,
+      &AllocatedSize,
+      &AllocatedSizeB,
+      &IsFat
+      );
+    DEBUG ((DEBUG_INFO, "Result of mkext hook on %s is %r\n", FileName, Status));
+
+    //
+    // If not mkext, return original file.
+    //
+    if (!EFI_ERROR (Status)) {
+      Status = OcKernelProcessMkext (
+        mOcConfiguration,
+        Kernel,
+        &KernelSize,
+        AllocatedSize,
+        AllocatedSizeB,
+        IsFat
+        );
+
+      Status = GetFileModifcationTime (*NewHandle, &ModificationTime);
+      if (EFI_ERROR (Status)) {
+        ZeroMem (&ModificationTime, sizeof (ModificationTime));
+      }
+
+      (*NewHandle)->Close(*NewHandle);
+
+      //
+      // This was our file, yet firmware is dying.
+      //
+      Status = CreateVirtualFileFileNameCopy (FileName, Kernel, KernelSize, &ModificationTime, &VirtualFileHandle);
+      if (EFI_ERROR (Status)) {
+        DEBUG ((DEBUG_WARN, "Failed to virtualise mkext file (%a)\n", FileName));
+        FreePool (Kernel);
+        return EFI_OUT_OF_RESOURCES;
+      }
+
+      //
+      // Return our handle.
+      //
+      *NewHandle = VirtualFileHandle;
+      return EFI_SUCCESS;
+    }
   }
 
   //
