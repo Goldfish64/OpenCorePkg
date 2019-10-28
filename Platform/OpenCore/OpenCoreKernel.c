@@ -872,6 +872,7 @@ OcKernelFileOpen (
     DEBUG ((DEBUG_INFO, "Trying mkext hook on %s\n", FileName));
     Status = ReadAppleMkext (
       *NewHandle,
+      mOcConfiguration->Kernel.Add.Count,
       OcKernelLoadKextsAndReserve (mOcStorage, mOcConfiguration),
       &Kernel,
       &KernelSize,
