@@ -686,11 +686,11 @@ OcKernelProcessMkext (
       &MkextSize64
     );
 
-    DEBUG ((DEBUG_INFO, "AllocSize 32: %u 64: %u\n", AllocatedSizeA, AllocatedSizeB));
+  //  DEBUG ((DEBUG_INFO, "AllocSize 32: %u 64: %u\n", AllocatedSizeA, AllocatedSizeB));
 
     Status = OcKernelProcessMkext (Config, &Mkext[MkextOffset32], &MkextSize32, AllocatedSizeA, 0, FALSE);
     Status = OcKernelProcessMkext (Config, &Mkext[MkextOffset64], &MkextSize64, AllocatedSizeB, 0, FALSE);
-    DEBUG ((DEBUG_INFO, "New 32 size %u 64 size %u\n", MkextSize32, MkextSize64));
+  //  DEBUG ((DEBUG_INFO, "New 32 size %u 64 size %u\n", MkextSize32, MkextSize64));
 
     if (!UpdateFatHeader (Mkext, *MkextSize, MkextSize32, MkextSize64)) {
       return EFI_INVALID_PARAMETER;
@@ -710,7 +710,10 @@ OcKernelProcessMkext (
       }
 
       Status = MkextInjectKext (&Context, "/tmp/b.kext", Kext->PlistData, Kext->PlistDataSize, Kext->ImageData, Kext->ImageDataSize);
-      ASSERT (Status == RETURN_SUCCESS);
+      if (EFI_ERROR (Status)) {
+        DEBUG ((DEBUG_WARN, "OC: Mkext inject error - %r\n", Status));
+      }
+      //ASSERT (Status == RETURN_SUCCESS);
     }
 
     Status = MkextInjectComplete (&Context);
@@ -842,19 +845,14 @@ OcKernelFileOpen (
   // Hook /S/L/E and provide virtual directory overlay for injected kexts.
   //
   if (OpenMode == EFI_FILE_MODE_READ
-    && StrCmp (FileName, L"System\\Library\\Extensions2") == 0) {
+    && StrCmp (FileName, L"System\\Library\\Extensions") == 0) {
     DEBUG ((DEBUG_INFO, "OC: Hooking into /S/L/E directory\n"));
 
     //
     // Load kexts into memory and build directory.
     //
-    OcKernelLoadKextsAndReserve (mOcStorage, mOcConfiguration);
+    OcKernelLoadKextsAndReserve (mOcStorage, mOcConfiguration); // TODO
     return OcKernelBuildExtensionsDir (mOcConfiguration, NewHandle, FileName);
-  }
-
-  if (OpenMode == EFI_FILE_MODE_READ
-    && StrCmp (FileName, L"System\\Library\\Extensions") == 0) {
-    DEBUG ((DEBUG_INFO, "OC: Passing into /S/L/E directory\n"));
   }
 
   //
@@ -862,7 +860,7 @@ OcKernelFileOpen (
   // This allows for patching/blocking.
   //
   if (OpenMode == EFI_FILE_MODE_READ
-    && StrnCmp (FileName, L"System\\Library\\Extensions2\\", L_STR_LEN (L"System\\Library\\Extensions2\\")) == 0) {
+    && StrnCmp (FileName, L"System\\Library\\Extensions\\", L_STR_LEN (L"System\\Library\\Extensions\\")) == 0) {
     return OcKernelProcessExtensionsDir (mOcConfiguration, NewHandle, FileName);
   }
 

@@ -38,6 +38,7 @@ OcKernelBuildExtensionsDir (
 {
   EFI_STATUS           Status;
   EFI_FILE_INFO        *FileInfo;
+  EFI_TIME             ModificationTime;
 
   UINTN                DirectorySize;
   UINTN                DirectoryOffset;
@@ -139,7 +140,12 @@ OcKernelBuildExtensionsDir (
     DirectoryOffset += ALIGN_VALUE (SIZE_OF_EFI_FILE_INFO + BundleFileNameSize, OC_ALIGNOF (EFI_FILE_INFO));
   }
 
-  Status = CreateVirtualDirFileNameCopy (FileName, DirectoryBuffer, DirectorySize, NULL, *File, &VirtualFileHandle);
+  Status = GetFileModifcationTime (*File, &ModificationTime);
+  if (EFI_ERROR (Status)) {
+    ZeroMem (&ModificationTime, sizeof (ModificationTime));
+  }
+
+  Status = CreateVirtualDirFileNameCopy (FileName, DirectoryBuffer, DirectorySize, &ModificationTime, *File, &VirtualFileHandle);
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_WARN, "Failed to virtualise dir file (%a)\n", FileName));
     FreePool (DirectoryBuffer);
