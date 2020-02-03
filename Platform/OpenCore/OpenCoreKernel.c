@@ -643,6 +643,124 @@ OcKernelProcessPrelinked (
 
 STATIC
 EFI_STATUS
+OcKernelProcessKernel (
+  IN     OC_GLOBAL_CONFIG     *Config,
+  IN     UINT32               DarwinVersion,
+  IN OUT UINT8                *Kernel,
+  IN OUT UINT32               *KernelSize,
+  IN     UINT32               AllocatedSize
+  )
+{
+  EFI_STATUS         PrelinkedStatus;
+
+  OcKernelApplyPatches (Config, DarwinVersion, NULL, Kernel, *KernelSize);
+
+  PrelinkedStatus = OcKernelProcessPrelinked (
+    Config,
+    DarwinVersion,
+    Kernel,
+    KernelSize,
+    AllocatedSize
+    );
+
+  DEBUG ((DEBUG_INFO, "Prelinked status - %r\n", PrelinkedStatus));
+
+  return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+OcKernelProcessMkext (
+  IN     OC_GLOBAL_CONFIG     *Config,
+  IN     UINT32               DarwinVersion,
+  IN OUT UINT8                *Mkext,
+  IN OUT UINT32               *MkextSize,
+  IN     UINT32               AllocatedSize
+  )
+{
+  EFI_STATUS            Status;
+  MKEXT_CONTEXT         Context;
+  UINT32                Index;
+  OC_KERNEL_ADD_ENTRY   *Kext;
+
+  Status = MkextContextInit (&Context, Mkext, *MkextSize, AllocatedSize);
+
+  for (Index = 0; Index < Config->Kernel.Add.Count; Index++) {
+    Kext = Config->Kernel.Add.Values[Index];
+    if (!Kext->Enabled || Kext->PlistDataSize == 0) {
+      continue;
+    }
+
+    Status = MkextInjectKext (&Context, "/tmp/b.kext", Kext->PlistData, Kext->PlistDataSize, Kext->ImageData, Kext->ImageDataSize);
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_WARN, "OC: Mkext inject error - %r\n", Status));
+    } else {
+      DEBUG ((DEBUG_INFO, "OC: Mkext inject success for %u\n", Index));
+    }
+  }
+
+  Status = MkextInjectComplete (&Context);
+  ASSERT (Status == RETURN_SUCCESS);
+
+  *MkextSize = Context.MkextSize;
+  return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+OcKernelCreateKernelFile (
+  IN OUT EFI_FILE_PROTOCOL      **File,
+  IN     CHAR16                 *FileName,
+  IN     UINT8                  *Buffer,
+  IN     UINT32                 BufferSize,
+  IN     KERNEL_IMAGE_CONTEXT   *Image32,
+  IN     KERNEL_IMAGE_CONTEXT   *Image64
+  )
+{
+  EFI_STATUS          Status;
+  UINT32              FileSize;
+  CHAR16              *FileNameCopy;
+  EFI_FILE_PROTOCOL   *VirtualFileHandle;
+  EFI_TIME            ModificationTime;
+
+  if (Image32->Size > 0 && Image64->Size > 0) {
+    UpdateAppleKernelFat (Buffer, BufferSize, Image32, Image64);
+    FileSize = BufferSize;      
+  } else {
+    FileSize = Image32->Size > 0 ? Image32->Size : Image64->Size;
+  }
+
+  Status = GetFileModifcationTime (*File, &ModificationTime);
+  if (EFI_ERROR (Status)) {
+    ZeroMem (&ModificationTime, sizeof (ModificationTime));
+  }
+  (*File)->Close(*File);
+
+  //
+  // This was our file, yet firmware is dying.
+  //
+  FileNameCopy = AllocateCopyPool (StrSize (FileName), FileName);
+  if (FileNameCopy == NULL) {
+    DEBUG ((DEBUG_WARN, "Failed to allocate kernel name (%a) copy\n", FileName));
+    return EFI_OUT_OF_RESOURCES;
+  }
+
+  Status = CreateVirtualFile (FileNameCopy, Buffer, FileSize, &ModificationTime, &VirtualFileHandle);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_WARN, "Failed to virtualise kernel file (%a)\n", FileName));
+    FreePool (FileNameCopy);
+    return EFI_OUT_OF_RESOURCES;
+  }
+
+  //
+  // Return our handle.
+  //
+  *File = VirtualFileHandle;
+  return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
 EFIAPI
 OcKernelFileOpen (
   IN  EFI_FILE_PROTOCOL       *This,
@@ -652,20 +770,18 @@ OcKernelFileOpen (
   IN  UINT64                  Attributes
   )
 {
-  EFI_STATUS         Status;
-  UINT8              *Kernel;
-  UINT32             KernelSize;
-  UINT32             AllocatedSize;
-  CHAR16             *FileNameCopy;
-  EFI_FILE_PROTOCOL  *VirtualFileHandle;
-  EFI_STATUS         PrelinkedStatus;
-  EFI_TIME           ModificationTime;
-  UINT32             DarwinVersion;
+  EFI_STATUS            Status;
+  UINT8                 *Buffer;
+  UINT32                AllocatedSize;
+  UINT32                DarwinVersion;
+
+  KERNEL_IMAGE_CONTEXT  Image32;
+  KERNEL_IMAGE_CONTEXT  Image64;
 
   Status = This->Open (This, NewHandle, FileName, OpenMode, Attributes);
 
   DEBUG ((
-    DEBUG_VERBOSE,
+    DEBUG_INFO,
     "Opening file %s with %u mode gave - %r\n",
     FileName,
     (UINT32) OpenMode,
@@ -683,64 +799,113 @@ OcKernelFileOpen (
   //
   if (OpenMode == EFI_FILE_MODE_READ
     && StrStr (FileName, L"kernel") != NULL
+    && StrStr (FileName, L".kext") == NULL
     && StrCmp (FileName, L"System\\Library\\Kernels\\kernel") != 0) {
-
     DEBUG ((DEBUG_INFO, "Trying XNU hook on %s\n", FileName));
-    Status = ReadAppleKernel (
+
+    ReadAppleKernel (
       *NewHandle,
-      &Kernel,
-      &KernelSize,
+      OcKernelLoadKextsAndReserve (mOcStorage, mOcConfiguration),
+      &Buffer,
       &AllocatedSize,
-      OcKernelLoadKextsAndReserve (mOcStorage, mOcConfiguration)
-      );
+      &Image32,
+      &Image64
+    );
     DEBUG ((DEBUG_INFO, "Result of XNU hook on %s is %r\n", FileName, Status));
 
     //
-    // This is not Apple kernel, just return the original file.
+    // If this is not Apple kernel, just return the original file.
     //
     if (!EFI_ERROR (Status)) {
-      DarwinVersion = OcKernelReadDarwinVersion (Kernel, KernelSize);
-      OcKernelApplyPatches (mOcConfiguration, DarwinVersion, NULL, Kernel, KernelSize);
+      DarwinVersion = OcKernelReadDarwinVersion (Buffer, AllocatedSize);
 
-      PrelinkedStatus = OcKernelProcessPrelinked (
-        mOcConfiguration,
-        DarwinVersion,
-        Kernel,
-        &KernelSize,
-        AllocatedSize
+      if (Image32.Size > 0) {  
+        Status = OcKernelProcessKernel (
+          mOcConfiguration,
+          DarwinVersion,
+          &Buffer[Image32.Offset],
+          &Image32.Size,
+          Image32.AllocatedSize
         );
+      }
+      if (Image64.Size > 0) {
+        Status = OcKernelProcessKernel (
+          mOcConfiguration,
+          DarwinVersion,
+          &Buffer[Image64.Offset],
+          &Image64.Size,
+          Image64.AllocatedSize
+        );
+      }
 
-      DEBUG ((DEBUG_INFO, "Prelinked status - %r\n", PrelinkedStatus));
+      Status = OcKernelCreateKernelFile (
+        NewHandle,
+        FileName,
+        Buffer,
+        AllocatedSize,
+        &Image32,
+        &Image64
+      );
 
-      Status = GetFileModifcationTime (*NewHandle, &ModificationTime);
       if (EFI_ERROR (Status)) {
-        ZeroMem (&ModificationTime, sizeof (ModificationTime));
+        FreePool (Buffer);
+        return Status;
+      }
+      return EFI_SUCCESS;
+    }
+  } else if (OpenMode == EFI_FILE_MODE_READ
+    && StrStr (FileName, L"Extensions.mkext") != NULL) {
+    DEBUG ((DEBUG_INFO, "Trying mkext hook on %s\n", FileName));
+
+    Status = ReadAppleMkext (
+      *NewHandle,
+      OcKernelLoadKextsAndReserve (mOcStorage, mOcConfiguration),
+      mOcConfiguration->Kernel.Add.Count,
+      &Buffer,
+      &AllocatedSize,
+      &Image32,
+      &Image64
+    );
+    DEBUG ((DEBUG_INFO, "Result of mkext hook on %s is %r\n", FileName, Status));
+
+    //
+    // If this is not Apple mkext, just return the original file.
+    //
+    if (!EFI_ERROR (Status)) {
+      DarwinVersion = 0;
+
+      if (Image32.Size > 0) {  
+        Status = OcKernelProcessMkext (
+          mOcConfiguration,
+          DarwinVersion,
+          &Buffer[Image32.Offset],
+          &Image32.Size,
+          Image32.AllocatedSize
+        );
+      }
+      if (Image64.Size > 0) {
+        Status = OcKernelProcessMkext (
+          mOcConfiguration,
+          DarwinVersion,
+          &Buffer[Image64.Offset],
+          &Image64.Size,
+          Image64.AllocatedSize
+        );
       }
 
-      (*NewHandle)->Close(*NewHandle);
+      Status = OcKernelCreateKernelFile (
+        NewHandle,
+        FileName,
+        Buffer,
+        AllocatedSize,
+        &Image32,
+        &Image64
+      );
 
-      //
-      // This was our file, yet firmware is dying.
-      //
-      FileNameCopy = AllocateCopyPool (StrSize (FileName), FileName);
-      if (FileNameCopy == NULL) {
-        DEBUG ((DEBUG_WARN, "Failed to allocate kernel name (%a) copy\n", FileName));
-        FreePool (Kernel);
-        return EFI_OUT_OF_RESOURCES;
-      }
-
-      Status = CreateVirtualFile (FileNameCopy, Kernel, KernelSize, &ModificationTime, &VirtualFileHandle);
       if (EFI_ERROR (Status)) {
-        DEBUG ((DEBUG_WARN, "Failed to virtualise kernel file (%a)\n", FileName));
-        FreePool (Kernel);
-        FreePool (FileNameCopy);
-        return EFI_OUT_OF_RESOURCES;
+        FreePool (Buffer);
+        return Status;
       }
-
-      //
-      // Return our handle.
-      //
-      *NewHandle = VirtualFileHandle;
       return EFI_SUCCESS;
     }
   }
