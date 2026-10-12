@@ -29,7 +29,7 @@
 STATIC
 UINT64
 PrelinkedFindLastLoadAddress (
-  IN XML_NODE  *KextList
+  IN PRELINKED_CONTEXT  *Context
   )
 {
   UINT32       KextCount;
@@ -41,10 +41,25 @@ PrelinkedFindLastLoadAddress (
   XML_NODE     *KextPlistValue;
   UINT64       LoadAddress;
   UINT64       LoadSize;
+  UINT8        *PrelinkBundle;
+  UINT32       PrelinkBundleSize;
+  UINT32       PrelinkBundleAllocSize;
+  UINT32       KmodAddress;
+  UINT32       KmodOffset;
 
-  KextCount = XmlNodeChildren (KextList);
+  KMOD_INFO_32_V1  *Kmod;
+
+  KextCount = XmlNodeChildren (Context->KextList);
   if (KextCount == 0) {
     return 0;
+  }
+
+  if (Context->IsV1) {
+    PrelinkBundleAllocSize = 128;
+    PrelinkBundle = AllocateZeroPool (PrelinkBundleAllocSize);
+    if (PrelinkBundle == NULL) {
+      return 0;
+    }
   }
 
   //
@@ -52,8 +67,11 @@ PrelinkedFindLastLoadAddress (
   // yet there might be an arbitrary amount of trailing executable-less kexts.
   //
   for (KextIndex = 1; KextIndex <= KextCount; ++KextIndex) {
-    LastKext = PlistNodeCast (XmlNodeChild (KextList, KextCount - KextIndex), PLIST_NODE_TYPE_DICT);
+    LastKext = PlistNodeCast (XmlNodeChild (Context->KextList, KextCount - KextIndex), PLIST_NODE_TYPE_DICT);
     if (LastKext == NULL) {
+      if (Context->IsV1) {
+        FreePool (PrelinkBundle);
+      }
       return 0;
     }
 
@@ -67,13 +85,50 @@ PrelinkedFindLastLoadAddress (
         continue;
       }
 
-      if ((LoadAddress == 0) && (AsciiStrCmp (KextPlistKey, PRELINK_INFO_EXECUTABLE_LOAD_ADDR_KEY) == 0)) {
-        if (!PlistIntegerValue (KextPlistValue, &LoadAddress, sizeof (LoadAddress), TRUE)) {
+      if ((Context->IsV1) && (LoadAddress == 0) && (LoadSize == 0) && (AsciiStrCmp (KextPlistKey, PRELINK_V1_INFO_BUNDLE_KEY) == 0)) {
+        if (!PlistDataSize (KextPlistValue, &PrelinkBundleSize)) {
+          if (Context->IsV1) {
+            FreePool (PrelinkBundle);
+          }
           return 0;
         }
-      } else if ((LoadSize == 0) && (AsciiStrCmp (KextPlistKey, PRELINK_INFO_EXECUTABLE_SIZE_KEY) == 0)) {
-        if (!PlistIntegerValue (KextPlistValue, &LoadSize, sizeof (LoadSize), TRUE)) {
+
+        if (PrelinkBundleSize > PrelinkBundleAllocSize) {
+          PrelinkBundle = ReallocatePool (PrelinkBundleAllocSize, PrelinkBundleSize, PrelinkBundle);
+          if (PrelinkBundle == NULL) {
+            return 0;
+          }
+          PrelinkBundleAllocSize = PrelinkBundleSize;
+        }
+
+        if (!PlistDataValue (KextPlistValue, PrelinkBundle, &PrelinkBundleSize)) {
+          if (Context->IsV1) {
+            FreePool (PrelinkBundle);
+          }
           return 0;
+        }
+
+        KmodAddress = SwapBytes32 (PrelinkBundle[0]);
+        KmodOffset  = KmodAddress - Context->PrelinkedTextSection->Section32.Address + Context->PrelinkedTextSection->Section32.Offset;
+        Kmod        = (KMOD_INFO_32_V1 *) (Context->Prelinked + KmodOffset);
+
+        LoadAddress = Kmod->Address;
+        LoadSize    = Kmod->Size;
+      } else {
+        if ((LoadAddress == 0) && (AsciiStrCmp (KextPlistKey, PRELINK_INFO_EXECUTABLE_LOAD_ADDR_KEY) == 0)) {
+          if (!PlistIntegerValue (KextPlistValue, &LoadAddress, sizeof (LoadAddress), TRUE)) {
+            if (Context->IsV1) {
+              FreePool (PrelinkBundle);
+            }
+            return 0;
+          }
+        } else if ((LoadSize == 0) && (AsciiStrCmp (KextPlistKey, PRELINK_INFO_EXECUTABLE_SIZE_KEY) == 0)) {
+          if (!PlistIntegerValue (KextPlistValue, &LoadSize, sizeof (LoadSize), TRUE)) {
+            if (Context->IsV1) {
+              FreePool (PrelinkBundle);
+            }
+            return 0;
+          }
         }
       }
 
@@ -83,12 +138,19 @@ PrelinkedFindLastLoadAddress (
     }
 
     if (BaseOverflowAddU64 (LoadAddress, LoadSize, &LoadAddress)) {
+      if (Context->IsV1) {
+        FreePool (PrelinkBundle);
+      }
       return 0;
     }
 
     if (LoadAddress != 0) {
       break;
     }
+  }
+
+  if (Context->IsV1) {
+    FreePool (PrelinkBundle);
   }
 
   return LoadAddress;
@@ -281,61 +343,114 @@ PrelinkedContextInit (
   }
 
   //
-  // Register normal segment entries.
+  // Check for prelinkedkernel version 1.
   //
-  Status = PrelinkedGetSegmentsFromMacho (
-             &Context->PrelinkedMachContext,
-             &Context->PrelinkedInfoSegment,
-             &Context->PrelinkedInfoSection
-             );
-  if (EFI_ERROR (Status)) {
-    return Status;
-  }
+  Context->PrelinkedV1Segment = MachoGetSegmentByName (
+                                  &Context->PrelinkedMachContext,
+                                  PRELINK_V1_SEGMENT
+                                  );
+  Context->IsV1 = Context->PrelinkedV1Segment != NULL;
 
-  if (Context->IsKernelCollection) {
+  if (Context->IsV1) {
     //
-    // Additionally process special entries for KC.
+    // Version 1 is always 32-bit only.
     //
-    Status = PrelinkedGetSegmentsFromMacho (
-               &Context->InnerMachContext,
-               (MACH_SEGMENT_COMMAND_ANY **)&Context->InnerInfoSegment,
-               (MACH_SECTION_ANY **)&Context->InnerInfoSection
-               );
-    if (EFI_ERROR (Status)) {
-      return Status;
+    if (!Context->Is32Bit) {
+      return EFI_INVALID_PARAMETER;
     }
 
-    Context->RegionSegment = MachoGetSegmentByName64 (
-                               &Context->PrelinkedMachContext,
-                               KC_REGION0_SEGMENT
-                               );
-    if (Context->RegionSegment == NULL) {
+    Context->PrelinkedTextSection = MachoGetSectionByName (
+                                      &Context->PrelinkedMachContext,
+                                      Context->PrelinkedV1Segment,
+                                      PRELINK_TEXT_SECTION
+                                      );
+    if (Context->PrelinkedTextSection == NULL) {
+      return EFI_NOT_FOUND;
+    }
+
+    Context->PrelinkedSymtabSection = MachoGetSectionByName (
+                                        &Context->PrelinkedMachContext,
+                                        Context->PrelinkedV1Segment,
+                                        PRELINK_V1_SYMTAB_SECTION
+                                        );
+    if (Context->PrelinkedSymtabSection == NULL) {
+      return EFI_NOT_FOUND;
+    }
+
+    Context->PrelinkedInfoSection = MachoGetSectionByName (
+                                      &Context->PrelinkedMachContext,
+                                      Context->PrelinkedV1Segment,
+                                      PRELINK_INFO_SECTION
+                                      );
+    if (Context->PrelinkedInfoSection == NULL) {
       return EFI_NOT_FOUND;
     }
 
     Context->LinkEditSegment = MachoGetSegmentByName (
                                  &Context->PrelinkedMachContext,
-                                 KC_LINKEDIT_SEGMENT
+                                 PRELINK_V1_LINKEDIT_SEGMENT
                                  );
     if (Context->LinkEditSegment == NULL) {
       return EFI_NOT_FOUND;
     }
   } else {
-    Context->PrelinkedTextSegment = MachoGetSegmentByName (
-                                      &Context->PrelinkedMachContext,
-                                      PRELINK_TEXT_SEGMENT
-                                      );
-    if (Context->PrelinkedTextSegment == NULL) {
-      return EFI_NOT_FOUND;
+    //
+    // Register normal segment entries.
+    //
+    Status = PrelinkedGetSegmentsFromMacho (
+              &Context->PrelinkedMachContext,
+              &Context->PrelinkedInfoSegment,
+              &Context->PrelinkedInfoSection
+              );
+    if (EFI_ERROR (Status)) {
+      return Status;
     }
 
-    Context->PrelinkedTextSection = MachoGetSectionByName (
-                                      &Context->PrelinkedMachContext,
-                                      Context->PrelinkedTextSegment,
-                                      PRELINK_TEXT_SECTION
-                                      );
-    if (Context->PrelinkedTextSection == NULL) {
-      return EFI_NOT_FOUND;
+    if (Context->IsKernelCollection) {
+      //
+      // Additionally process special entries for KC.
+      //
+      Status = PrelinkedGetSegmentsFromMacho (
+                &Context->InnerMachContext,
+                (MACH_SEGMENT_COMMAND_ANY **)&Context->InnerInfoSegment,
+                (MACH_SECTION_ANY **)&Context->InnerInfoSection
+                );
+      if (EFI_ERROR (Status)) {
+        return Status;
+      }
+
+      Context->RegionSegment = MachoGetSegmentByName64 (
+                                &Context->PrelinkedMachContext,
+                                KC_REGION0_SEGMENT
+                                );
+      if (Context->RegionSegment == NULL) {
+        return EFI_NOT_FOUND;
+      }
+
+      Context->LinkEditSegment = MachoGetSegmentByName (
+                                  &Context->PrelinkedMachContext,
+                                  KC_LINKEDIT_SEGMENT
+                                  );
+      if (Context->LinkEditSegment == NULL) {
+        return EFI_NOT_FOUND;
+      }
+    } else {
+      Context->PrelinkedTextSegment = MachoGetSegmentByName (
+                                        &Context->PrelinkedMachContext,
+                                        PRELINK_TEXT_SEGMENT
+                                        );
+      if (Context->PrelinkedTextSegment == NULL) {
+        return EFI_NOT_FOUND;
+      }
+
+      Context->PrelinkedTextSection = MachoGetSectionByName (
+                                        &Context->PrelinkedMachContext,
+                                        Context->PrelinkedTextSegment,
+                                        PRELINK_TEXT_SECTION
+                                        );
+      if (Context->PrelinkedTextSection == NULL) {
+        return EFI_NOT_FOUND;
+      }
     }
   }
 
@@ -366,7 +481,7 @@ PrelinkedContextInit (
 
   //
   // For a kernel collection the this is a full plist, while for legacy prelinked format
-  // it starts with a <dict> node.
+  // it starts with a <dict> node. Version 1 prelinked starts with an <array> node.
   //
   if (Context->IsKernelCollection) {
     DocumentRoot = PlistDocumentRoot (Context->PrelinkedInfoDocument);
@@ -374,7 +489,7 @@ PrelinkedContextInit (
     DocumentRoot = XmlDocumentRoot (Context->PrelinkedInfoDocument);
   }
 
-  PrelinkedInfoRoot = PlistNodeCast (DocumentRoot, PLIST_NODE_TYPE_DICT);
+  PrelinkedInfoRoot = PlistNodeCast (DocumentRoot, Context->IsV1 ? PLIST_NODE_TYPE_ARRAY : PLIST_NODE_TYPE_DICT);
   if (PrelinkedInfoRoot == NULL) {
     PrelinkedContextFree (Context);
     return EFI_INVALID_PARAMETER;
@@ -397,25 +512,37 @@ PrelinkedContextInit (
   //
   // In legacy mode last load address is last kext address.
   //
-  PrelinkedInfoRootCount = PlistDictChildren (PrelinkedInfoRoot);
-  for (PrelinkedInfoRootIndex = 0; PrelinkedInfoRootIndex < PrelinkedInfoRootCount; ++PrelinkedInfoRootIndex) {
-    PrelinkedInfoRootKey = PlistKeyValue (PlistDictChild (PrelinkedInfoRoot, PrelinkedInfoRootIndex, &Context->KextList));
-    if (PrelinkedInfoRootKey == NULL) {
-      continue;
+  if (Context->IsV1) {
+    Context->KextList = PrelinkedInfoRoot;
+
+    if (Context->PrelinkedLastLoadAddress == 0) {
+      Context->PrelinkedLastLoadAddress = PrelinkedFindLastLoadAddress (Context);
     }
 
-    if (AsciiStrCmp (PrelinkedInfoRootKey, PRELINK_INFO_DICTIONARY_KEY) == 0) {
-      if (PlistNodeCast (Context->KextList, PLIST_NODE_TYPE_ARRAY) != NULL) {
-        if (Context->PrelinkedLastLoadAddress == 0) {
-          Context->PrelinkedLastLoadAddress = PrelinkedFindLastLoadAddress (Context->KextList);
-        }
-
-        if (Context->PrelinkedLastLoadAddress != 0) {
-          return EFI_SUCCESS;
-        }
+    if (Context->PrelinkedLastLoadAddress != 0) {
+      return EFI_SUCCESS;
+    }
+  } else {
+    PrelinkedInfoRootCount = PlistDictChildren (PrelinkedInfoRoot);
+    for (PrelinkedInfoRootIndex = 0; PrelinkedInfoRootIndex < PrelinkedInfoRootCount; ++PrelinkedInfoRootIndex) {
+      PrelinkedInfoRootKey = PlistKeyValue (PlistDictChild (PrelinkedInfoRoot, PrelinkedInfoRootIndex, &Context->KextList));
+      if (PrelinkedInfoRootKey == NULL) {
+        continue;
       }
 
-      break;
+      if (AsciiStrCmp (PrelinkedInfoRootKey, PRELINK_INFO_DICTIONARY_KEY) == 0) {
+        if (PlistNodeCast (Context->KextList, PLIST_NODE_TYPE_ARRAY) != NULL) {
+          if (Context->PrelinkedLastLoadAddress == 0) {
+            Context->PrelinkedLastLoadAddress = PrelinkedFindLastLoadAddress (Context);
+          }
+
+          if (Context->PrelinkedLastLoadAddress != 0) {
+            return EFI_SUCCESS;
+          }
+        }
+
+        break;
+      }
     }
   }
 
@@ -571,6 +698,58 @@ PrelinkedInjectPrepare (
     Context->PrelinkedLastLoadAddress            += AlignedExpansion;
     Context->LinkEditSegment->Segment64.Size     += AlignedExpansion;
     Context->LinkEditSegment->Segment64.FileSize += AlignedExpansion;
+  } else if (Context->IsV1) {
+    //
+    // V1 of prelinkedkernel has __LINKEDIT as the last segment in the file,
+    // after __PRELINK.  __PRELINK __symtab and __LINKEDIT will be moved downwards.
+    // New kexts will be appended over old symtab and plist info.
+    //
+    // Apple TV (XNU 8.8.2)
+    //
+    // 00111000 - 0041f000 (at 00000000 - 0030e000) - __TEXT
+    // 0041f000 - 004d8000 (at 0030e000 - 0034a000) - __DATA
+    // 00100000 - 0010a000 (at 0034a000 - 00354000) - __HIB
+    // 004d8000 - 004db000 (at 00354000 - 00357000) - __DESC
+    // 004db000 - 004dc000 (at 00357000 - 00358000) - __VECTORS
+    // 004dc000 - 00516000 (at 00358000 - 00391000) - __KLD
+    // 00516000 - 00f6b000 (at 00391000 - 00de6000) - __PRELINK
+    //
+    // 00516000 - 00ec2000 (at 00391000 - 00d3d000) - __PRELINK __text
+    // 00ec2000 - 00f19000 (at 00d3d000 - 00d94000) - __PRELINK __symtab
+    // 00f19000 - 00f6b000 (at 00d94000 - 00de6000) - __PRELINK __info
+    //
+    // 00f6b000 - 00fd1548 (at 00de6000 - 00e4c548) - __LINKEDIT
+    //
+    // 10.5.6
+    //
+    // 00111000 - 004d8000 (at 00000000 - 003c7000) - __TEXT
+    // 004d8000 - 00558000 (at 003c7000 - 00409000) - __DATA
+    // 00100000 - 0010a000 (at 00409000 - 00413000) - __HIB
+    // 00558000 - 0055b000 (at 00413000 - 00416000) - __DESC
+    // 0055b000 - 0055c000 (at 00416000 - 00417000) - __VECTORS
+    // 0055c000 - 00596000 (at 00417000 - 00451000) - __KLD
+    // 00596000 - 00e29000 (at 00451000 - 00ce4000) - __PRELINK
+    //
+    // 00596000 - 00d4c000 (at 00451000 - 00c07000) - __PRELINK __text
+    // 00d4c000 - 00da2000 (at 00c07000 - 00c5d000) - __PRELINK __symtab
+    // 00da2000 - 00e29000 (at 00c5d000 - 00ce4000) - __PRELINK __info
+    //
+    // 00e29000 - 016147b4 (at 00ce4000 - 00d627b4) - __LINKEDIT
+    //
+
+    if ((Context->PrelinkedV1Segment->Segment32.FileOffset <= Context->LinkEditSegment->Segment32.FileOffset)
+      || (Context->PrelinkedSymtabSection->Section32.Offset <= Context->PrelinkedTextSection->Section32.Offset)
+      || (Context->PrelinkedInfoSection->Section32.Offset <= Context->PrelinkedSymtabSection->Section32.Offset))
+    {
+      //
+      // TODO: Implement logic to handle sections not being in the order above.
+      //
+      return EFI_UNSUPPORTED;
+    }
+
+    Context->PrelinkedInfoSection->Section32.Address  = 0;
+    Context->PrelinkedInfoSection->Section32.Size     = 0;
+    Context->PrelinkedInfoSection->Section32.Offset   = 0;
   } else {
     //
     // For older variant of the prelinkedkernel plist info is normally

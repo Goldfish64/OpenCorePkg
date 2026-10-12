@@ -14,6 +14,8 @@
 
 #include <Base.h>
 
+#include <IndustryStandard/AppleKmodInfo.h>
+
 #include <Library/BaseLib.h>
 #include <Library/BaseMemoryLib.h>
 #include <Library/DebugLib.h>
@@ -64,6 +66,9 @@ InternalCreatePrelinkedKext (
   UINT64                    KxldOffset;
   UINT32                    KxldStateSize;
   UINT32                    HeaderOffset;
+  UINT8                     *PrelinkedBundle;
+  UINT32                    PrelinkedBundleSize;
+  KMOD_INFO_32_V1           *Kmod;
   BOOLEAN                   Found;
   BOOLEAN                   HasExe;
   BOOLEAN                   IsKpi;
@@ -125,6 +130,31 @@ InternalCreatePrelinkedKext (
       if (CompatibleVersion == NULL) {
         break;
       }
+    } else if ((Prelinked != NULL) && (Prelinked->IsV1) && (VirtualBase == 0) && (VirtualKmod == 0) && (SourceBase == 0) && (SourceSize == 0)
+      && (AsciiStrCmp (KextPlistKey, PRELINK_V1_INFO_BUNDLE_KEY) == 0))
+    {
+      if (!PlistDataSize (KextPlistValue, &PrelinkedBundleSize)) {
+        break;
+      }
+
+      PrelinkedBundle = AllocateZeroPool (PrelinkedBundleSize);
+      if (PrelinkedBundle == NULL) {
+        return NULL;
+      }
+
+      if (!PlistDataValue (KextPlistValue, PrelinkedBundle, &PrelinkedBundleSize)) {
+        FreePool (PrelinkedBundle);
+        break;
+      }
+
+      VirtualKmod = SwapBytes32(*((UINT32 *) PrelinkedBundle));
+      FreePool (PrelinkedBundle);
+
+      Kmod = (KMOD_INFO_32_V1 *) &Prelinked->Prelinked[VirtualKmod - Prelinked->PrelinkedTextSection->Section32.Address + Prelinked->PrelinkedTextSection->Section32.Offset];
+
+      VirtualBase = Kmod->Address;
+      SourceBase  = Kmod->Address;
+      SourceSize  = Kmod->Size;
     } else if ((Prelinked != NULL) && (VirtualBase == 0) && (AsciiStrCmp (KextPlistKey, PRELINK_INFO_EXECUTABLE_LOAD_ADDR_KEY) == 0)) {
       if (!PlistIntegerValue (KextPlistValue, &VirtualBase, sizeof (VirtualBase), TRUE)) {
         break;
@@ -203,6 +233,8 @@ InternalCreatePrelinkedKext (
   if ((Prelinked != NULL) && HasExe) {
     if (Prelinked->IsKernelCollection) {
       BaseSegment = (MACH_SEGMENT_COMMAND_ANY *)Prelinked->RegionSegment;
+    } else if (Prelinked->IsV1) {
+      BaseSegment = Prelinked->PrelinkedV1Segment;
     } else {
       BaseSegment = Prelinked->PrelinkedTextSegment;
     }

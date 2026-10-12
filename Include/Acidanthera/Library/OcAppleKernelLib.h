@@ -42,6 +42,12 @@
 #define PRELINK_INFO_LINK_STATE_ADDR_KEY           "_PrelinkLinkState"
 #define PRELINK_INFO_LINK_STATE_SIZE_KEY           "_PrelinkLinkStateSize"
 
+#define PRELINK_V1_SEGMENT            "__PRELINK"
+#define PRELINK_V1_SYMTAB_SECTION     "__symtab"
+#define PRELINK_V1_LINKEDIT_SEGMENT   "__LINKEDIT"
+
+#define PRELINK_V1_INFO_BUNDLE_KEY    "OSBundlePrelink"
+
 #define INFO_BUNDLE_IDENTIFIER_KEY          "CFBundleIdentifier"
 #define INFO_BUNDLE_EXECUTABLE_KEY          "CFBundleExecutable"
 #define INFO_BUNDLE_LIBRARIES_KEY           "OSBundleLibraries"
@@ -255,7 +261,16 @@ typedef struct {
   //
   UINT32                                 PrelinkedStateKextsSize;
   //
-  // Pointer to KC_LINKEDIT_SEGMENT (for KC mode).
+  // Pointer to PRELINK_V1_SEGMENT.
+  // V1 prelinkedkernel contains all sections in a single segment.
+  //
+  MACH_SEGMENT_COMMAND_ANY               *PrelinkedV1Segment;
+  //
+  // Pointer to PRELINK_V1_SYMTAB_SECTION.
+  //
+  MACH_SECTION_ANY                       *PrelinkedSymtabSection;
+  //
+  // Pointer to KC_LINKEDIT_SEGMENT (for KC mode) or PRELINK_V1_LINKEDIT_SEGMENT (for prelinkedkernel v1).
   //
   MACH_SEGMENT_COMMAND_ANY               *LinkEditSegment;
   //
@@ -340,6 +355,10 @@ typedef struct {
   // Prelinked is 32-bit.
   //
   BOOLEAN                                Is32Bit;
+  //
+  // Prelinked is version 1 (10.5 and older).
+  //
+  BOOLEAN                                IsV1;
 } PRELINKED_CONTEXT;
 
 //
