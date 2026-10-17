@@ -108,7 +108,7 @@ PrelinkedFindLastLoadAddress (
           return 0;
         }
 
-        KmodAddress = SwapBytes32 (PrelinkBundle[0]);
+        KmodAddress = SwapBytes32 (*((UINT32 *) (PrelinkBundle)));
         KmodOffset  = KmodAddress - Context->PrelinkedTextSection->Section32.Address + Context->PrelinkedTextSection->Section32.Offset;
         Kmod        = (KMOD_INFO_32_V1 *) (Context->Prelinked + KmodOffset);
 
