@@ -659,6 +659,15 @@ PrelinkedInjectPrepare (
   EFI_STATUS  Status;
   UINT64      SegmentEndOffset;
   UINT32      AlignedExpansion;
+  UINT8       *LinkEdit;
+  UINT32      LinkEditOffset;
+  UINT32      LinkEditNewOffset;
+  UINT32      LinkEditAlignedSize;
+  UINT32      PrelinkNewOffset;
+  UINT32      Index;
+
+  MACH_LOAD_COMMAND   *Command;
+  MACH_SYMTAB_COMMAND *Symtab;
 
   if (Context->IsKernelCollection) {
     //
@@ -737,7 +746,7 @@ PrelinkedInjectPrepare (
     // 00e29000 - 016147b4 (at 00ce4000 - 00d627b4) - __LINKEDIT
     //
 
-    if ((Context->PrelinkedV1Segment->Segment32.FileOffset <= Context->LinkEditSegment->Segment32.FileOffset)
+    if ((Context->LinkEditSegment->Segment32.FileOffset <= Context->PrelinkedV1Segment->Segment32.FileOffset)
       || (Context->PrelinkedSymtabSection->Section32.Offset <= Context->PrelinkedTextSection->Section32.Offset)
       || (Context->PrelinkedInfoSection->Section32.Offset <= Context->PrelinkedSymtabSection->Section32.Offset))
     {
@@ -745,6 +754,54 @@ PrelinkedInjectPrepare (
       // TODO: Implement logic to handle sections not being in the order above.
       //
       return EFI_UNSUPPORTED;
+    }
+
+    LinkEditOffset      = Context->LinkEditSegment->Segment32.FileOffset;
+    LinkEditNewOffset   = Context->PrelinkedV1Segment->Segment32.FileOffset;
+    LinkEditAlignedSize = MACHO_ALIGN (Context->LinkEditSegment->Segment32.FileSize);
+    PrelinkNewOffset    = Context->PrelinkedV1Segment->Segment32.FileOffset + LinkEditAlignedSize;
+
+    LinkEdit = AllocateCopyPool (
+      Context->LinkEditSegment->Segment32.FileSize,
+      &Context->Prelinked[LinkEditOffset]
+      );
+    if (LinkEdit == NULL) {
+      return EFI_OUT_OF_RESOURCES;
+    }
+
+    //
+    // Swap PRELINK and LINKEDIT file locations.
+    //
+    CopyMem (
+      &Context->Prelinked[PrelinkNewOffset],
+      &Context->Prelinked[Context->PrelinkedV1Segment->Segment32.FileOffset],
+      Context->PrelinkedV1Segment->Segment32.FileSize
+      );
+    CopyMem (
+      &Context->Prelinked[LinkEditNewOffset],
+      LinkEdit,
+      Context->LinkEditSegment->Segment32.FileSize
+      );
+
+    Context->LinkEditSegment->Segment32.FileOffset       = LinkEditNewOffset;
+    Context->PrelinkedV1Segment->Segment32.FileOffset    = PrelinkNewOffset;
+    Context->PrelinkedTextSection->Section32.Offset     += LinkEditAlignedSize;
+    Context->PrelinkedSymtabSection->Section32.Offset   += LinkEditAlignedSize;
+    Context->PrelinkedSize                               = Context->PrelinkedSymtabSection->Section32.Offset + Context->PrelinkedSymtabSection->Section32.Size;
+
+    Context->PrelinkedMachContext.SymbolTable = (MACH_NLIST_ANY*) (((CHAR8 *) Context->PrelinkedMachContext.SymbolTable) - LinkEditOffset - LinkEditNewOffset);
+    Context->PrelinkedMachContext.StringTable -= LinkEditOffset - LinkEditNewOffset;
+
+    Command = &Context->PrelinkedMachContext.MachHeader->Header32.Commands[0];
+    for (Index = 0; Index < Context->PrelinkedMachContext.MachHeader->Header32.NumCommands; Index++) {
+      if (Command->CommandType == MACH_LOAD_COMMAND_SYMTAB) {
+        Symtab = (MACH_SYMTAB_COMMAND *) Command;
+        Symtab->StringsOffset -= LinkEditOffset - LinkEditNewOffset;
+        Symtab->SymbolsOffset -= LinkEditOffset - LinkEditNewOffset;
+        break;
+      }
+
+      Command = NEXT_MACH_LOAD_COMMAND(Command);
     }
 
     Context->PrelinkedInfoSection->Section32.Address  = 0;
@@ -1014,64 +1071,95 @@ PrelinkedInjectComplete (
 
  #endif
 
-  if (Context->Is32Bit) {
-    Context->PrelinkedInfoSegment->Segment32.VirtualAddress = (UINT32)Context->PrelinkedLastAddress;
-    Context->PrelinkedInfoSegment->Segment32.Size           = MACHO_ALIGN (ExportedInfoSize);
-    Context->PrelinkedInfoSegment->Segment32.FileOffset     = Context->PrelinkedSize;
-    Context->PrelinkedInfoSegment->Segment32.FileSize       = MACHO_ALIGN (ExportedInfoSize);
-    Context->PrelinkedInfoSection->Section32.Address        = (UINT32)Context->PrelinkedLastAddress;
-    Context->PrelinkedInfoSection->Section32.Size           = MACHO_ALIGN (ExportedInfoSize);
-    Context->PrelinkedInfoSection->Section32.Offset         = Context->PrelinkedSize;
+ if (Context->IsV1) {
+    Context->PrelinkedV1Segment->Segment32.Size        = Context->PrelinkedTextSection->Section32.Size
+      + Context->PrelinkedSymtabSection->Section32.Size + MACHO_ALIGN (ExportedInfoSize);
+    Context->PrelinkedV1Segment->Segment32.FileSize    = Context->PrelinkedTextSection->Section32.Size
+      + Context->PrelinkedSymtabSection->Section32.Size + MACHO_ALIGN (ExportedInfoSize);
+    Context->PrelinkedInfoSection->Section32.Address   = Context->PrelinkedSymtabSection->Section32.Address
+      + Context->PrelinkedSymtabSection->Section32.Size;
+    Context->PrelinkedInfoSection->Section32.Size      = MACHO_ALIGN (ExportedInfoSize);
+    Context->PrelinkedInfoSection->Section32.Offset    =
+      Context->PrelinkedSymtabSection->Section32.Offset + Context->PrelinkedSymtabSection->Section32.Size;
+    Context->LinkEditSegment->Segment32.VirtualAddress = MACHO_ALIGN (Context->PrelinkedV1Segment->Segment32.VirtualAddress
+      + Context->PrelinkedV1Segment->Segment32.Size);
+
+
+    CopyMem (
+      &Context->Prelinked[Context->PrelinkedInfoSection->Section32.Offset],
+      ExportedInfo,
+      ExportedInfoSize
+      );
+
+    ZeroMem (
+      &Context->Prelinked[Context->PrelinkedInfoSection->Section32.Offset + ExportedInfoSize],
+      MACHO_ALIGN (ExportedInfoSize) - ExportedInfoSize
+      );
+
+    Context->PrelinkedSize += MACHO_ALIGN (ExportedInfoSize);
+    Context->PrelinkedLastAddress += MACHO_ALIGN (ExportedInfoSize);
+    Context->PrelinkedLastLoadAddress += MACHO_ALIGN (ExportedInfoSize);
+
   } else {
-    Context->PrelinkedInfoSegment->Segment64.VirtualAddress = Context->PrelinkedLastAddress;
-    Context->PrelinkedInfoSegment->Segment64.Size           = MACHO_ALIGN (ExportedInfoSize);
-    Context->PrelinkedInfoSegment->Segment64.FileOffset     = Context->PrelinkedSize;
-    Context->PrelinkedInfoSegment->Segment64.FileSize       = MACHO_ALIGN (ExportedInfoSize);
-    Context->PrelinkedInfoSection->Section64.Address        = Context->PrelinkedLastAddress;
-    Context->PrelinkedInfoSection->Section64.Size           = MACHO_ALIGN (ExportedInfoSize);
-    Context->PrelinkedInfoSection->Section64.Offset         = Context->PrelinkedSize;
-  }
+    if (Context->Is32Bit) {
+      Context->PrelinkedInfoSegment->Segment32.VirtualAddress = (UINT32)Context->PrelinkedLastAddress;
+      Context->PrelinkedInfoSegment->Segment32.Size           = MACHO_ALIGN (ExportedInfoSize);
+      Context->PrelinkedInfoSegment->Segment32.FileOffset     = Context->PrelinkedSize;
+      Context->PrelinkedInfoSegment->Segment32.FileSize       = MACHO_ALIGN (ExportedInfoSize);
+      Context->PrelinkedInfoSection->Section32.Address        = (UINT32)Context->PrelinkedLastAddress;
+      Context->PrelinkedInfoSection->Section32.Size           = MACHO_ALIGN (ExportedInfoSize);
+      Context->PrelinkedInfoSection->Section32.Offset         = Context->PrelinkedSize;
+    } else {
+      Context->PrelinkedInfoSegment->Segment64.VirtualAddress = Context->PrelinkedLastAddress;
+      Context->PrelinkedInfoSegment->Segment64.Size           = MACHO_ALIGN (ExportedInfoSize);
+      Context->PrelinkedInfoSegment->Segment64.FileOffset     = Context->PrelinkedSize;
+      Context->PrelinkedInfoSegment->Segment64.FileSize       = MACHO_ALIGN (ExportedInfoSize);
+      Context->PrelinkedInfoSection->Section64.Address        = Context->PrelinkedLastAddress;
+      Context->PrelinkedInfoSection->Section64.Size           = MACHO_ALIGN (ExportedInfoSize);
+      Context->PrelinkedInfoSection->Section64.Offset         = Context->PrelinkedSize;
+    }
 
-  if (Context->IsKernelCollection) {
-    //
-    // For newer variant of the prelinkedkernel plist we need to adapt it
-    // in both inner and outer images.
-    //
-    Context->InnerInfoSegment->VirtualAddress = Context->PrelinkedLastAddress;
-    Context->InnerInfoSegment->Size           = MACHO_ALIGN (ExportedInfoSize);
-    Context->InnerInfoSegment->FileOffset     = Context->PrelinkedSize;
-    Context->InnerInfoSegment->FileSize       = MACHO_ALIGN (ExportedInfoSize);
-    Context->InnerInfoSection->Address        = Context->PrelinkedLastAddress;
-    Context->InnerInfoSection->Size           = MACHO_ALIGN (ExportedInfoSize);
-    Context->InnerInfoSection->Offset         = Context->PrelinkedSize;
-  }
+    if (Context->IsKernelCollection) {
+      //
+      // For newer variant of the prelinkedkernel plist we need to adapt it
+      // in both inner and outer images.
+      //
+      Context->InnerInfoSegment->VirtualAddress = Context->PrelinkedLastAddress;
+      Context->InnerInfoSegment->Size           = MACHO_ALIGN (ExportedInfoSize);
+      Context->InnerInfoSegment->FileOffset     = Context->PrelinkedSize;
+      Context->InnerInfoSegment->FileSize       = MACHO_ALIGN (ExportedInfoSize);
+      Context->InnerInfoSection->Address        = Context->PrelinkedLastAddress;
+      Context->InnerInfoSection->Size           = MACHO_ALIGN (ExportedInfoSize);
+      Context->InnerInfoSection->Offset         = Context->PrelinkedSize;
+    }
 
-  CopyMem (
-    &Context->Prelinked[Context->PrelinkedSize],
-    ExportedInfo,
-    ExportedInfoSize
-    );
+    CopyMem (
+      &Context->Prelinked[Context->PrelinkedSize],
+      ExportedInfo,
+      ExportedInfoSize
+      );
 
-  ZeroMem (
-    &Context->Prelinked[Context->PrelinkedSize + ExportedInfoSize],
-    MACHO_ALIGN (ExportedInfoSize) - ExportedInfoSize
-    );
+    ZeroMem (
+      &Context->Prelinked[Context->PrelinkedSize + ExportedInfoSize],
+      MACHO_ALIGN (ExportedInfoSize) - ExportedInfoSize
+      );
 
-  Context->PrelinkedLastAddress += MACHO_ALIGN (ExportedInfoSize);
-  Context->PrelinkedSize        += MACHO_ALIGN (ExportedInfoSize);
+    Context->PrelinkedLastAddress += MACHO_ALIGN (ExportedInfoSize);
+    Context->PrelinkedSize        += MACHO_ALIGN (ExportedInfoSize);
 
-  Context->PrelinkedMachContext.FileSize = Context->PrelinkedSize;
+    Context->PrelinkedMachContext.FileSize = Context->PrelinkedSize;
 
-  if (Context->IsKernelCollection) {
-    //
-    // After rebuilding the KC we may have moved the __LINKEDIT command.
-    // This happens when __REGION kexts are squashed.
-    // Obtain its address again.
-    //
-    Context->LinkEditSegment = MachoGetSegmentByName (
-                                 &Context->PrelinkedMachContext,
-                                 KC_LINKEDIT_SEGMENT
-                                 );
+    if (Context->IsKernelCollection) {
+      //
+      // After rebuilding the KC we may have moved the __LINKEDIT command.
+      // This happens when __REGION kexts are squashed.
+      // Obtain its address again.
+      //
+      Context->LinkEditSegment = MachoGetSegmentByName (
+                                  &Context->PrelinkedMachContext,
+                                  KC_LINKEDIT_SEGMENT
+                                  );
+    }
   }
 
   FreePool (ExportedInfo);
