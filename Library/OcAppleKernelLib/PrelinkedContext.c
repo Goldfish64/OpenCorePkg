@@ -54,6 +54,7 @@ PrelinkedFindLastLoadAddress (
     return 0;
   }
 
+  PrelinkBundle = NULL;
   if (Context->IsV1) {
     PrelinkBundleAllocSize = 128;
     PrelinkBundle = AllocateZeroPool (PrelinkBundleAllocSize);
