@@ -130,8 +130,8 @@ InternalCreatePrelinkedKext (
       if (CompatibleVersion == NULL) {
         break;
       }
-    } else if ((Prelinked != NULL) && (Prelinked->IsV1) && (VirtualBase == 0) && (VirtualKmod == 0) && (SourceBase == 0) && (SourceSize == 0)
-      && (AsciiStrCmp (KextPlistKey, PRELINK_V1_INFO_BUNDLE_KEY) == 0))
+    } else if (  (Prelinked != NULL) && (Prelinked->IsV1) && (VirtualBase == 0) && (VirtualKmod == 0) && (SourceBase == 0) && (SourceSize == 0)
+              && (AsciiStrCmp (KextPlistKey, PRELINK_V1_INFO_BUNDLE_KEY) == 0))
     {
       if (!PlistDataSize (KextPlistValue, &PrelinkedBundleSize)) {
         break;
@@ -147,10 +147,10 @@ InternalCreatePrelinkedKext (
         break;
       }
 
-      VirtualKmod = SwapBytes32(*((UINT32 *) PrelinkedBundle));
+      VirtualKmod = SwapBytes32 (*((UINT32 *)PrelinkedBundle));
       FreePool (PrelinkedBundle);
 
-      Kmod = (KMOD_INFO_32_V1 *) &Prelinked->Prelinked[VirtualKmod - Prelinked->PrelinkedTextSection->Section32.Address + Prelinked->PrelinkedTextSection->Section32.Offset];
+      Kmod = (KMOD_INFO_32_V1 *)&Prelinked->Prelinked[VirtualKmod - Prelinked->PrelinkedTextSection->Section32.Address + Prelinked->PrelinkedTextSection->Section32.Offset];
 
       VirtualBase = Kmod->Address;
       SourceBase  = Kmod->Address;

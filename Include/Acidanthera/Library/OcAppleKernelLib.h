@@ -42,11 +42,11 @@
 #define PRELINK_INFO_LINK_STATE_ADDR_KEY           "_PrelinkLinkState"
 #define PRELINK_INFO_LINK_STATE_SIZE_KEY           "_PrelinkLinkStateSize"
 
-#define PRELINK_V1_SEGMENT            "__PRELINK"
-#define PRELINK_V1_SYMTAB_SECTION     "__symtab"
-#define PRELINK_V1_LINKEDIT_SEGMENT   "__LINKEDIT"
+#define PRELINK_V1_SEGMENT           "__PRELINK"
+#define PRELINK_V1_SYMTAB_SECTION    "__symtab"
+#define PRELINK_V1_LINKEDIT_SEGMENT  "__LINKEDIT"
 
-#define PRELINK_V1_INFO_BUNDLE_KEY    "OSBundlePrelink"
+#define PRELINK_V1_INFO_BUNDLE_KEY  "OSBundlePrelink"
 
 #define INFO_BUNDLE_IDENTIFIER_KEY          "CFBundleIdentifier"
 #define INFO_BUNDLE_EXECUTABLE_KEY          "CFBundleExecutable"
